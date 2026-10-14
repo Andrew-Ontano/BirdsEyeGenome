@@ -32,7 +32,7 @@ def test_cli_count_verbose_flag(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "INFO" in result.stderr
-    assert "Loaded accession: seq1" in result.stderr
+    assert "Successfully completed k-mer counting" in result.stderr
 
 
 def test_cli_count_missing_file(tmp_path: Path) -> None:

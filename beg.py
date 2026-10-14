@@ -9,7 +9,7 @@ from src.commands.count import run_count
 from src.commands.plot import run_plot
 
 
-def configure_logging(verbose: bool):
+def configure_logging(verbose: bool) -> None:
     """Configure standard logging level and format based on verbosity flag.
 
     Args:
@@ -19,11 +19,12 @@ def configure_logging(verbose: bool):
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
     )
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     """Build and return the main ArgumentParser with subcommands.
 
     Returns:
