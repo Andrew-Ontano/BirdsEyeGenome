@@ -32,20 +32,62 @@ def build_parser() -> argparse.ArgumentParser:
         help="Count k-mers across genomic sequences via sliding windows.",
     )
     parser_count.add_argument(
-        "-i",
-        "--input",
+        "-i", "--input",
         type=str,
         required=True,
         help="Path to input FASTA file.",
     )
     parser_count.add_argument(
-        "-o",
-        "--output",
+        "-f", "--input-format",
+        type=str,
+        required=False,
+        default="fasta",
+        help="Input sequence file format (supported by BioPython).",
+    )
+    parser_count.add_argument(
+        "-o", "--output",
         type=str,
         required=False,
         default=None,
         help="Path to output BEG file.",
     )
+    parser_count.add_argument(
+        "-p", "--output-format",
+        type=str,
+        required=False,
+        default="beg",
+        choices=["beg", "db"],
+        help="Output format. Options: tab-separated values (beg); sqlite database (db).",
+    )
+    parser_count.add_argument(
+        "-w", "--window-size",
+        type=int,
+        required=False,
+        default=10000,
+        help="Window size for sliding windows.",
+    )
+    parser_count.add_argument(
+        "-s", "--window-interval",
+        type=int,
+        required=False,
+        default=10000,
+        help="Window interval for sliding windows.",
+    )
+    parser_count.add_argument(
+        "-k", "--kmer-size",
+        type=int,
+        required=False,
+        default=3,
+        help="Kmer size to count.",
+    )
+    parser_count.add_argument(
+        "-t", "--threads",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of threads for parallel processing.",
+    )
+
     parser_count.set_defaults(func=run_count)
 
     # Subparser for plot
@@ -54,33 +96,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Plot k-mer distributions and sequence signatures.",
     )
     parser_plot.add_argument(
-        "-i",
-        "--input",
+        "-i", "--input",
         type=str,
         required=True,
-        help="Path to input BEG file or sequence data.",
+        help="Path to input BEG file or database.",
+    )
+    parser.add_argument(
+        "-f", "--input-format",
+        type=str,
+        required=False,
+        default="beg",
+        choices=["beg", "db"],
+        help="Input file format. Options: tab-separated values (beg); sqlite database (db).",
     )
     parser_plot.add_argument(
-        "-o",
-        "--output",
+        "-o", "--output-prefix",
         type=str,
         required=False,
         default=None,
-        help="Path to output image/figure.",
+        help="Prefix for output images/figures.",
+    )
+    parser_plot.add_argument(
+        "-p", "--output-format",
+        type=str,
+        required=False,
+        default="png",
+        choices=["png", "html"],
     )
     parser_plot.set_defaults(func=run_plot)
 
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    """Main CLI entry point.
+def main():
+    # Main CLI entry point.
 
-    Args:
-        argv: Optional list of command line arguments. If None, sys.argv[1:] is used.
-    """
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
 
     if args.command is None:
         parser.print_help()

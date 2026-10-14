@@ -9,9 +9,9 @@ description = "Genomic sequence signature at a distance."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "biopython",
-    "pandas",
-    "numpy",
+    "biopython >=1.84",
+    "pandas >=2.2.3",
+    "numpy >=2.5.4",
 ]
 
 [project.scripts]
