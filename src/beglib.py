@@ -7,10 +7,7 @@ from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
 
-def read_genome(
-    input_file: str | Path,
-    input_format: str = "fasta",
-) -> Iterator[SeqRecord]:
+def read_genome(input_file: str, input_format: str = "fasta"):
     """Check that the input file exists and load sequence records via Biopython SeqIO.
 
     Args:

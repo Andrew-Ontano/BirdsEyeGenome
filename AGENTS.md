@@ -23,8 +23,7 @@
 ---
 
 ## 3. Code Quality & Style Standards
-* **Language/Framework Conventions:** 
-  * Strict typing required (e.g., Python type hints for all function signatures).
+* **Language/Framework Conventions:**
   * Use descriptive variable names; avoid abbreviations unless widely accepted in domain context.
 * **Documentation:** Every public module, class, and core pipeline function must include docstrings explaining parameters, return types, and side effects.
 * **Formatting & Linting:** Code must comply with project linters (e.g., `ruff`, `black`, or `flake8`). Always run the linter before completing a task.

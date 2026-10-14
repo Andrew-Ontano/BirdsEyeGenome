@@ -7,7 +7,7 @@ import src.beglib as bl  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
-def run_plot(args) -> None:
+def run_plot(args):
     """Execute the plot command.
 
     Args:
