@@ -1,12 +1,16 @@
 """Command handler for sequence plotting."""
 
-import src.beglib as bl
+import logging
+
+import src.beglib as bl  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
-def run_plot(args):
+def run_plot(args) -> None:
     """Execute the plot command.
 
     Args:
         args: Parsed command line arguments containing input and output file paths.
     """
-    print("Executing 'plot' subparser command...")
+    logger.info("Executing 'plot' subparser command...")
