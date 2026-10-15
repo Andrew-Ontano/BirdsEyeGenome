@@ -42,7 +42,7 @@ def test_cli_count_db_output(tmp_path: Path) -> None:
 
     conn = sqlite3.connect(output_db)
     cursor = conn.cursor()
-    cursor.execute("SELECT library_name, seq_name FROM kmer_counts")
+    cursor.execute("SELECT library_name, seq_name FROM windows")
     rows = cursor.fetchall()
     assert len(rows) == 1
     assert rows[0] == ("dummy.fa", "seq1")

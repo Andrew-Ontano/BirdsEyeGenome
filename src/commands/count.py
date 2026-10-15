@@ -54,8 +54,8 @@ def run_count(args) -> None:
 
         logger.info("Writing output to '%s' (format: %s)", output_file, output_format)
         if output_format == "db":
-            conn = bl.init_db(output_file, kmers)
-            bl.write_counts_db(conn, library_name, results, kmers)
+            conn = bl.init_db(output_file, kmers, kmer_size=args.kmer_size)
+            bl.write_counts_db(conn, library_name, results, kmers, kmer_size=args.kmer_size)
             conn.close()
         else:
             bl.write_counts_beg(output_file, args.input, library_name, kmers, results)

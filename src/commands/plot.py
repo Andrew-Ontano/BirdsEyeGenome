@@ -98,7 +98,7 @@ def run_plot(args) -> None:
                     y_upper,
                     color=color_map[col],
                     label=col,
-                    linewidth=0,
+                    linewidth=0.15,
                 )
                 y_lower = y_upper
 
