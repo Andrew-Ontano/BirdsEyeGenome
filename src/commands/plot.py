@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import numpy as np
 
 import src.beglib as bl
 
@@ -85,11 +86,21 @@ def run_plot(args) -> None:
         for seq in seq_names:
             seq_df = proc_df[proc_df["seq_name"] == seq]
             x_vals = seq_df["window_start"].values
-            y_stack = [seq_df[col].values for col in feature_cols]
-            colors = [color_map[col] for col in feature_cols]
 
             fig, ax = plt.subplots(figsize=(12, 5))
-            ax.stackplot(x_vals, y_stack, labels=feature_cols, colors=colors, edgecolor="none")
+
+            y_lower = np.zeros(len(x_vals))
+            for col in feature_cols:
+                y_upper = y_lower + seq_df[col].values
+                ax.fill_between(
+                    x_vals,
+                    y_lower,
+                    y_upper,
+                    color=color_map[col],
+                    label=col,
+                    linewidth=0,
+                )
+                y_lower = y_upper
 
             ax.set_title(f"Genomic Signature: {seq}", fontsize=14, fontweight="bold")
             ax.set_xlabel("Genomic Position (bp)", fontsize=11)
@@ -98,7 +109,6 @@ def run_plot(args) -> None:
             ax.set_xlim(x_vals[0], x_vals[-1] if len(x_vals) > 1 else x_vals[0] + 1)
 
             if key_setting == "yes":
-                # Add legend outside or best location
                 ax.legend(
                     bbox_to_anchor=(1.02, 1),
                     loc="upper left",
