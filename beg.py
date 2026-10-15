@@ -7,6 +7,7 @@ import sys
 
 from src.commands.count import run_count
 from src.commands.plot import run_plot
+from src.commands.server import run_server
 
 
 def configure_logging(verbose: bool) -> None:
@@ -55,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_count = subparsers.add_parser(
         "count",
         help="Count k-mers across genomic sequences via sliding windows.",
+        description="Count k-mers across genomic sequences via sliding windows.",
         parents=[parent_parser],
     )
     parser_count.add_argument(
@@ -128,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_plot = subparsers.add_parser(
         "plot",
         help="Plot k-mer distributions and sequence signatures.",
+        description="Plot k-mer distributions and sequence signatures.",
         parents=[parent_parser],
     )
     parser_plot.add_argument(
@@ -142,9 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--input-format",
         type=str,
         required=False,
-        default="beg",
-        choices=["beg", "db"],
-        help="Input file format. Options: tab-separated values (beg); sqlite database (db).",
+        default="auto",
+        choices=["auto", "beg", "db"],
+        help="Input file format. Options: auto, beg, db.",
     )
     parser_plot.add_argument(
         "-o",
@@ -160,9 +163,97 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         required=False,
         default="png",
-        choices=["png", "html"],
+        choices=["png", "jpg", "jpeg", "pdf", "svg"],
+        help="Output image format (default: png).",
+    )
+    parser_plot.add_argument(
+        "--dpi",
+        type=int,
+        required=False,
+        default=300,
+        help="Resolution in dots per inch for static image export (default: 300).",
+    )
+    parser_plot.add_argument(
+        "--key",
+        type=str,
+        required=False,
+        default="yes",
+        choices=["yes", "no", "alone"],
+        help="Key/legend setting: 'yes' (on image), 'no' (omitted), or 'alone' (separate image).",
+    )
+    parser_plot.add_argument(
+        "--subset",
+        type=str,
+        required=False,
+        default=None,
+        help="Comma-separated list of sequence names/IDs to plot.",
+    )
+    parser_plot.add_argument(
+        "--regex",
+        type=str,
+        required=False,
+        default=None,
+        help="Regex pattern to filter sequence names/IDs.",
+    )
+    parser_plot.add_argument(
+        "--canonical",
+        action="store_true",
+        default=False,
+        help="Show only canonical k-mer counts (collapse reverse complements).",
+    )
+    parser_plot.add_argument(
+        "--show-n-gaps",
+        action="store_true",
+        default=False,
+        help="Display N-gaps stack layer.",
     )
     parser_plot.set_defaults(func=run_plot)
+
+    # Subparser for server
+    parser_server = subparsers.add_parser(
+        "server",
+        help="Launch interactive web browser module to inspect sequence signatures.",
+        description="Launch interactive web browser module to inspect sequence signatures.",
+        parents=[parent_parser],
+    )
+    parser_server.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        required=False,
+        default=None,
+        help="Path to input BEG file or database.",
+    )
+    parser_server.add_argument(
+        "-f",
+        "--input-format",
+        type=str,
+        required=False,
+        default="auto",
+        choices=["auto", "beg", "db"],
+        help="Input file format.",
+    )
+    parser_server.add_argument(
+        "--host",
+        type=str,
+        required=False,
+        default="127.0.0.1",
+        help="Host address for web server (default: 127.0.0.1).",
+    )
+    parser_server.add_argument(
+        "--port",
+        type=int,
+        required=False,
+        default=8050,
+        help="Port for web server (default: 8050).",
+    )
+    parser_server.add_argument(
+        "--reloadable",
+        action="store_true",
+        default=False,
+        help="Enable attaching/reloading new BEG or DB data files in the web interface.",
+    )
+    parser_server.set_defaults(func=run_server)
 
     return parser
 
