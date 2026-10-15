@@ -1,22 +1,52 @@
 """Integration tests for beg count CLI command."""
 
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 
-def test_cli_count_valid_fasta(tmp_path: Path) -> None:
-    """Test running 'beg count -i dummy.fa' with a valid fasta file."""
-    fasta_content = ">seq1\nATGCATGC\n>seq2\nGATTACA\n"
+def test_cli_count_beg_output(tmp_path: Path) -> None:
+    """Test running 'beg count' creates a valid BEG TSV output file."""
+    fasta_content = ">seq1\nATGCATGC\n"
     fasta_file = tmp_path / "dummy.fa"
     fasta_file.write_text(fasta_content)
+    output_beg = tmp_path / "out.beg"
 
     result = subprocess.run(
-        [sys.executable, "beg.py", "count", "-i", str(fasta_file)],
+        [sys.executable, "beg.py", "count", "-i", str(fasta_file), "-o", str(output_beg)],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
+    assert output_beg.exists()
+    content = output_beg.read_text()
+    assert "# Input file:" in content
+    assert "library_name\tseq_name\twindow_start\twindow_stop\twindow_size" in content
+
+
+def test_cli_count_db_output(tmp_path: Path) -> None:
+    """Test running 'beg count -p db' creates a valid SQLite database output."""
+    fasta_content = ">seq1\nATGCATGC\n"
+    fasta_file = tmp_path / "dummy.fa"
+    fasta_file.write_text(fasta_content)
+    output_db = tmp_path / "out.db"
+
+    result = subprocess.run(
+        [sys.executable, "beg.py", "count", "-i", str(fasta_file), "-o", str(output_db), "-p", "db"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert output_db.exists()
+
+    conn = sqlite3.connect(output_db)
+    cursor = conn.cursor()
+    cursor.execute("SELECT library_name, seq_name FROM kmer_counts")
+    rows = cursor.fetchall()
+    assert len(rows) == 1
+    assert rows[0] == ("dummy.fa", "seq1")
+    conn.close()
 
 
 def test_cli_count_verbose_flag(tmp_path: Path) -> None:

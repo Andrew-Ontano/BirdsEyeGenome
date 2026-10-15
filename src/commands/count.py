@@ -3,6 +3,7 @@
 import logging
 import multiprocessing
 import sys
+from pathlib import Path
 
 import src.beglib as bl
 
@@ -17,6 +18,9 @@ def run_count(args) -> None:
     """
     logger.info("Executing 'count' subparser command...")
     try:
+        input_path = Path(args.input)
+        library_name = input_path.name
+
         records = bl.read_genome(args.input, args.input_format)
         kmers = bl.set_mers(args.kmer_size)
         logger.info("Generated %d k-mers for k-mer size %d", len(kmers), args.kmer_size)
@@ -41,6 +45,20 @@ def run_count(args) -> None:
         else:
             logger.info("Processing window tasks sequentially")
             results = [bl.count_mers(task) for task in tasks]
+
+        output_format = getattr(args, "output_format", "beg")
+        output_file = args.output
+        if not output_file:
+            ext = ".db" if output_format == "db" else ".beg"
+            output_file = str(input_path.with_suffix(ext))
+
+        logger.info("Writing output to '%s' (format: %s)", output_file, output_format)
+        if output_format == "db":
+            conn = bl.init_db(output_file, kmers)
+            bl.write_counts_db(conn, library_name, results, kmers)
+            conn.close()
+        else:
+            bl.write_counts_beg(output_file, args.input, library_name, kmers, results)
 
         logger.info("Successfully completed k-mer counting for %d window(s)", len(results))
 
