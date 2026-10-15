@@ -21,7 +21,7 @@ def read_genome(
     """Check that the input file exists and load sequence records via Biopython SeqIO.
 
     Args:
-        input_file (str): Path to the input genomic sequence file.
+        input_file (str | Path): Path to the input genomic sequence file.
         input_format (str, optional): Input sequence file format recognized by SeqIO.
             Defaults to "fasta".
 
@@ -132,7 +132,7 @@ def init_db(db_path: str, kmers: list[str]) -> sqlite3.Connection:
     """Initialize SQLite database with a tabulation table for k-mer counts.
 
     Args:
-        db_path (str): Path to SQLite database file.
+        db_path (str | Path): Path to SQLite database file.
         kmers (list[str]): List of k-mer names to include as count columns.
 
     Returns:
@@ -208,8 +208,8 @@ def write_counts_beg(
     """Write window count results to a tab-separated BEG file with comment metadata.
 
     Args:
-        output_file (str): Path to destination BEG file.
-        input_file (str): Total path to the input sequence file.
+        output_file (str | Path): Path to destination BEG file.
+        input_file (str | Path): Total path to the input sequence file.
         library_name (str): Shortened library name.
         kmers (list[str]): List of k-mers.
         results (list[dict[str, Any]]): List of window count result dictionaries.
@@ -234,8 +234,25 @@ def write_counts_beg(
             f.write("\t".join(row) + "\n")
 
 
+def kmer_sort_key(kmer: str) -> tuple[int, tuple[int, ...]]:
+    """Sorting key for k-mers: AT-rich first (AAA > TTT > CCC > GGG).
+
+    Args:
+        kmer (str): K-mer sequence string.
+
+    Returns:
+        tuple[int, tuple[int, ...]]: Sorting tuple key.
+    """
+    gc_count = sum(1 for char in kmer if char in ("G", "C"))
+    base_order = {"A": 0, "T": 1, "C": 2, "G": 3}
+    base_ranks = tuple(base_order.get(char, 9) for char in kmer)
+    return (gc_count, base_ranks)
+
+
 def generate_kmer_colors(kmers: list[str]) -> dict[str, str]:
-    """Generate color scheme for k-mers based on GC content and HSV luminance distribution.
+    """Generate color scheme for k-mers based on nucleotide composition.
+
+    A-rich k-mers are red, T-rich are orange, C-rich are blue, and G-rich are greenish/teal.
 
     Args:
         kmers (list[str]): List of k-mer strings.
@@ -246,32 +263,41 @@ def generate_kmer_colors(kmers: list[str]) -> dict[str, str]:
     if not kmers:
         return {}
 
-    k = len(kmers[0])
-    cmap = plt.get_cmap("coolwarm")
+    k = len(kmers[0]) if kmers else 1
 
-    at_bins: dict[int, list[str]] = {i: [] for i in range(k + 1)}
+    base_colors = {
+        "A": np.array([0.90, 0.15, 0.15]),
+        "T": np.array([0.95, 0.50, 0.15]),
+        "C": np.array([0.15, 0.40, 0.90]),
+        "G": np.array([0.15, 0.75, 0.55]),
+    }
+
+    comp_groups: dict[tuple[int, int, int, int], list[str]] = {}
     for kmer in kmers:
-        at_count = kmer.count("A") + kmer.count("T")
-        at_bins.setdefault(at_count, []).append(kmer)
+        cA = kmer.count("A")
+        cT = kmer.count("T")
+        cC = kmer.count("C")
+        cG = kmer.count("G")
+        comp = (cA, cT, cC, cG)
+        comp_groups.setdefault(comp, []).append(kmer)
 
     kmer_colors = {}
-    for at_count, kmer_list in at_bins.items():
-        if not kmer_list:
-            continue
-        at_fraction = at_count / k if k > 0 else 0.0
-        kmer_list.sort()
+    for comp, kmer_list in comp_groups.items():
+        cA, cT, cC, cG = comp
+        fA, fT, fC, fG = cA / k, cT / k, cC / k, cG / k
 
-        base_rgba = cmap(at_fraction)
-        base_hsv = mcolors.rgb_to_hsv(base_rgba[:3])
+        rgb_blend = fA * base_colors["A"] + fT * base_colors["T"] + fC * base_colors["C"] + fG * base_colors["G"]
+        base_hsv = mcolors.rgb_to_hsv(rgb_blend)
 
-        n_kmers = len(kmer_list)
-        if n_kmers > 1:
-            luminance_steps = np.linspace(0.3, 0.85, n_kmers)
+        kmer_list.sort(key=kmer_sort_key)
+        n = len(kmer_list)
+        if n > 1:
+            lum_steps = np.linspace(max(0.3, base_hsv[2] - 0.2), min(0.95, base_hsv[2] + 0.2), n)
         else:
-            luminance_steps = [0.6]
+            lum_steps = [base_hsv[2]]
 
         for i, kmer in enumerate(kmer_list):
-            new_hsv = (base_hsv[0], base_hsv[1], luminance_steps[i])
+            new_hsv = (base_hsv[0], base_hsv[1], lum_steps[i])
             new_rgb = mcolors.hsv_to_rgb(new_hsv)
             kmer_colors[kmer] = mcolors.to_hex(new_rgb)
 
@@ -304,11 +330,11 @@ def get_canonical_kmer(kmer: str) -> str:
     return min(kmer, rc)
 
 
-def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
+def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
     """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
 
     Args:
-        file_path (str): Path to the .beg or .db file.
+        file_path (str | Path): Path to the .beg or .db file.
         file_format (str): "beg", "db", or "auto" to infer from file extension.
 
     Returns:
@@ -370,14 +396,15 @@ def process_window_proportions(
             canonical_map.setdefault(canon, []).append(kmer)
 
         canon_counts = pd.DataFrame(index=df.index)
-        for canon in sorted(canonical_map.keys()):
+        for canon in sorted(canonical_map.keys(), key=kmer_sort_key):
             cols_to_sum = canonical_map[canon]
             canon_counts[canon] = counts_df[cols_to_sum].sum(axis=1)
 
         counts_df = canon_counts
         feature_kmers = list(counts_df.columns)
     else:
-        feature_kmers = kmer_cols
+        feature_kmers = sorted(kmer_cols, key=kmer_sort_key)
+        counts_df = counts_df[feature_kmers]
 
     raw_kmer_sum = df[kmer_cols].sum(axis=1)
 

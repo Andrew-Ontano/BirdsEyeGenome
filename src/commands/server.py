@@ -113,7 +113,7 @@ def build_figure(
     fig.update_layout(
         title=f"Genomic Signature: {seq_name}{title_suffix}",
         xaxis=dict(title="Genomic Position (bp)"),
-        yaxis=dict(title="Proportion", range=[0, 1]),
+        yaxis=dict(title="Proportion", range=[0, 1], fixedrange=True),
         template="plotly_white",
         legend=dict(
             orientation="v",
@@ -129,14 +129,14 @@ def build_figure(
 
 
 def create_app(
-    initial_file: str = "",
+    initial_file: str | None = None,
     input_format: str = "auto",
     reloadable: bool = False,
 ) -> dash.Dash:
     """Create and configure the Dash browser application.
 
     Args:
-        initial_file (str): Path to initial dataset file.
+        initial_file (str | None): Path to initial dataset file.
         input_format (str): Input format ("auto", "beg", "db").
         reloadable (bool): Allow attaching new data files in UI.
 
