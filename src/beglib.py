@@ -6,6 +6,10 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
@@ -184,7 +188,7 @@ def write_counts_db(
         row = [
             library_name,
             res["seq_name"],
-            res["start"]+1,
+            res["start"] + 1,
             res["end"],
             res["window_size"],
         ] + [counts.get(kmer, 0) for kmer in kmers]
@@ -223,8 +227,178 @@ def write_counts_beg(
             row = [
                 library_name,
                 res["seq_name"],
-                str(res["start"]+1),
+                str(res["start"] + 1),
                 str(res["end"]),
                 str(res["window_size"]),
             ] + [str(counts.get(kmer, 0)) for kmer in kmers]
             f.write("\t".join(row) + "\n")
+
+
+def generate_kmer_colors(kmers: list[str]) -> dict[str, str]:
+    """Generate color scheme for k-mers based on GC content and HSV luminance distribution.
+
+    Args:
+        kmers (list[str]): List of k-mer strings.
+
+    Returns:
+        dict[str, str]: Map of k-mer string to hex color code.
+    """
+    if not kmers:
+        return {}
+
+    k = len(kmers[0])
+    cmap = plt.get_cmap("coolwarm")
+
+    gc_bins: dict[int, list[str]] = {i: [] for i in range(k + 1)}
+    for kmer in kmers:
+        gc_count = kmer.count("G") + kmer.count("C")
+        gc_bins.setdefault(gc_count, []).append(kmer)
+
+    kmer_colors = {}
+    for gc_count, kmer_list in gc_bins.items():
+        if not kmer_list:
+            continue
+        gc_fraction = gc_count / k if k > 0 else 0.0
+        kmer_list.sort()
+
+        base_rgba = cmap(gc_fraction)
+        base_hsv = mcolors.rgb_to_hsv(base_rgba[:3])
+
+        n_kmers = len(kmer_list)
+        if n_kmers > 1:
+            luminance_steps = np.linspace(0.3, 0.85, n_kmers)
+        else:
+            luminance_steps = [0.6]
+
+        for i, kmer in enumerate(kmer_list):
+            new_hsv = (base_hsv[0], base_hsv[1], luminance_steps[i])
+            new_rgb = mcolors.hsv_to_rgb(new_hsv)
+            kmer_colors[kmer] = mcolors.to_hex(new_rgb)
+
+    return kmer_colors
+
+
+def get_reverse_complement(seq: str) -> str:
+    """Return the reverse complement of a DNA sequence string.
+
+    Args:
+        seq (str): Nucleotide sequence string.
+
+    Returns:
+        str: Reverse complemented nucleotide sequence.
+    """
+    trans = str.maketrans("ATCGatcg", "TAGCtagc")
+    return seq.translate(trans)[::-1]
+
+
+def get_canonical_kmer(kmer: str) -> str:
+    """Return the lexicographically smaller k-mer between kmer and its reverse complement.
+
+    Args:
+        kmer (str): K-mer string.
+
+    Returns:
+        str: Lexicographically smaller canonical k-mer.
+    """
+    rc = get_reverse_complement(kmer)
+    return min(kmer, rc)
+
+
+def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
+    """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
+
+    Args:
+        file_path (str | Path): Path to the .beg or .db file.
+        file_format (str): "beg", "db", or "auto" to infer from file extension.
+
+    Returns:
+        pd.DataFrame: DataFrame containing window counts.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Input file does not exist: {file_path}")
+
+    fmt = file_format.lower()
+    if fmt == "auto":
+        fmt = "db" if path.suffix.lower() == ".db" else "beg"
+
+    if fmt == "db":
+        conn = sqlite3.connect(str(path))
+        df = pd.read_sql_query("SELECT * FROM kmer_counts ORDER BY id ASC", conn)
+        conn.close()
+        if "id" in df.columns:
+            df = df.drop(columns=["id"])
+    else:
+        df = pd.read_csv(str(path), sep="\t", comment="#")
+
+    return df
+
+
+def process_window_proportions(
+    df: pd.DataFrame,
+    canonical: bool = False,
+    show_n_gaps: bool = False,
+) -> tuple[pd.DataFrame, list[str], dict[str, str]]:
+    """Process raw k-mer window counts into stacked proportion values for plotting.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing window count data.
+        canonical (bool): If True, collapse reverse-complement k-mers into canonical k-mers.
+        show_n_gaps (bool): If True, calculate and include N-gaps proportion layer.
+
+    Returns:
+        tuple[pd.DataFrame, list[str], dict[str, str]]:
+            - Processed DataFrame with proportion values.
+            - List of feature column names (in order of stacked display).
+            - Map of feature name to hex color string.
+    """
+    meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size"]
+    kmer_cols = [c for c in df.columns if c not in meta_cols]
+
+    if not kmer_cols:
+        raise ValueError("No k-mer count columns found in the dataset.")
+
+    processed_df = df[meta_cols].copy()
+    counts_df = df[kmer_cols].copy()
+
+    kmer_len = len(kmer_cols[0])
+
+    if canonical:
+        canonical_map: dict[str, list[str]] = {}
+        for kmer in kmer_cols:
+            canon = get_canonical_kmer(kmer)
+            canonical_map.setdefault(canon, []).append(kmer)
+
+        canon_counts = pd.DataFrame(index=df.index)
+        for canon in sorted(canonical_map.keys()):
+            cols_to_sum = canonical_map[canon]
+            canon_counts[canon] = counts_df[cols_to_sum].sum(axis=1)
+
+        counts_df = canon_counts
+        feature_kmers = list(counts_df.columns)
+    else:
+        feature_kmers = kmer_cols
+
+    raw_kmer_sum = df[kmer_cols].sum(axis=1)
+
+    feature_cols = []
+    color_map = {}
+
+    if show_n_gaps:
+        ns_count = (df["window_size"] - raw_kmer_sum - kmer_len + 1).clip(lower=0)
+        counts_df["Ns"] = ns_count
+        feature_cols.append("Ns")
+        color_map["Ns"] = "#000000"
+
+    feature_cols.extend(feature_kmers)
+
+    kmer_color_mapping = generate_kmer_colors(feature_kmers)
+    color_map.update(kmer_color_mapping)
+
+    total_counts = counts_df[feature_cols].sum(axis=1)
+    norm_denom = total_counts.replace(0, 1)
+
+    for col in feature_cols:
+        processed_df[col] = counts_df[col] / norm_denom
+
+    return processed_df, feature_cols, color_map
