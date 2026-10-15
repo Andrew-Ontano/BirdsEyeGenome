@@ -330,11 +330,11 @@ def get_canonical_kmer(kmer: str) -> str:
     return min(kmer, rc)
 
 
-def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
+def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
     """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
 
     Args:
-        file_path (str | Path): Path to the .beg or .db file.
+        file_path (str): Path to the .beg or .db file.
         file_format (str): "beg", "db", or "auto" to infer from file extension.
 
     Returns:
