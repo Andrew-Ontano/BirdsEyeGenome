@@ -129,14 +129,14 @@ def build_figure(
 
 
 def create_app(
-    initial_file: str | None = None,
+    initial_file: str = "",
     input_format: str = "auto",
     reloadable: bool = False,
 ) -> dash.Dash:
     """Create and configure the Dash browser application.
 
     Args:
-        initial_file (str | None): Path to initial dataset file.
+        initial_file (str): Path to initial dataset file.
         input_format (str): Input format ("auto", "beg", "db").
         reloadable (bool): Allow attaching new data files in UI.
 

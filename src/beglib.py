@@ -21,7 +21,7 @@ def read_genome(
     """Check that the input file exists and load sequence records via Biopython SeqIO.
 
     Args:
-        input_file (str | Path): Path to the input genomic sequence file.
+        input_file (str): Path to the input genomic sequence file.
         input_format (str, optional): Input sequence file format recognized by SeqIO.
             Defaults to "fasta".
 
@@ -132,7 +132,7 @@ def init_db(db_path: str, kmers: list[str]) -> sqlite3.Connection:
     """Initialize SQLite database with a tabulation table for k-mer counts.
 
     Args:
-        db_path (str | Path): Path to SQLite database file.
+        db_path (str): Path to SQLite database file.
         kmers (list[str]): List of k-mer names to include as count columns.
 
     Returns:
@@ -208,8 +208,8 @@ def write_counts_beg(
     """Write window count results to a tab-separated BEG file with comment metadata.
 
     Args:
-        output_file (str | Path): Path to destination BEG file.
-        input_file (str | Path): Total path to the input sequence file.
+        output_file (str): Path to destination BEG file.
+        input_file (str): Total path to the input sequence file.
         library_name (str): Shortened library name.
         kmers (list[str]): List of k-mers.
         results (list[dict[str, Any]]): List of window count result dictionaries.
@@ -249,19 +249,19 @@ def generate_kmer_colors(kmers: list[str]) -> dict[str, str]:
     k = len(kmers[0])
     cmap = plt.get_cmap("coolwarm")
 
-    gc_bins: dict[int, list[str]] = {i: [] for i in range(k + 1)}
+    at_bins: dict[int, list[str]] = {i: [] for i in range(k + 1)}
     for kmer in kmers:
-        gc_count = kmer.count("G") + kmer.count("C")
-        gc_bins.setdefault(gc_count, []).append(kmer)
+        at_count = kmer.count("A") + kmer.count("T")
+        at_bins.setdefault(at_count, []).append(kmer)
 
     kmer_colors = {}
-    for gc_count, kmer_list in gc_bins.items():
+    for at_count, kmer_list in at_bins.items():
         if not kmer_list:
             continue
-        gc_fraction = gc_count / k if k > 0 else 0.0
+        at_fraction = at_count / k if k > 0 else 0.0
         kmer_list.sort()
 
-        base_rgba = cmap(gc_fraction)
+        base_rgba = cmap(at_fraction)
         base_hsv = mcolors.rgb_to_hsv(base_rgba[:3])
 
         n_kmers = len(kmer_list)
@@ -304,11 +304,11 @@ def get_canonical_kmer(kmer: str) -> str:
     return min(kmer, rc)
 
 
-def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
+def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
     """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
 
     Args:
-        file_path (str | Path): Path to the .beg or .db file.
+        file_path (str): Path to the .beg or .db file.
         file_format (str): "beg", "db", or "auto" to infer from file extension.
 
     Returns:
