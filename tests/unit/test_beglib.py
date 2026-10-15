@@ -131,11 +131,50 @@ def test_init_db_and_write_counts_db(tmp_path: Path) -> None:
     write_counts_db(conn, "test.fa", results, kmers)
 
     cursor = conn.cursor()
-    cursor.execute('SELECT library_name, seq_name, window_start, window_stop, window_size, "AA", "AC" FROM kmer_counts')
+    cursor.execute("SELECT library_name, seq_name, window_start, window_stop, window_size FROM windows")
     rows = cursor.fetchall()
     assert len(rows) == 1
-    assert rows[0] == ("test.fa", "seq1", 1, 10, 10, 2, 1)
+    assert rows[0] == ("test.fa", "seq1", 1, 10, 10)
+
+    cursor.execute("SELECT window_id, kmer, count FROM kmer_counts ORDER BY kmer")
+    kmer_rows = cursor.fetchall()
+    assert len(kmer_rows) == 2
+    assert kmer_rows == [(1, "AA", 2), (1, "AC", 1)]
+
+    cursor.execute("SELECT key, value FROM metadata")
+    metadata = dict(cursor.fetchall())
+    assert metadata["kmer_size"] == "2"
+    assert metadata["library_name"] == "test.fa"
+
     conn.close()
+
+
+def test_sparse_storage_and_kmer_6(tmp_path: Path) -> None:
+    """Test normalized db structure with k-mer size 6 sparse counting."""
+    kmers_6 = set_mers(6)
+    db_file = tmp_path / "kmer6.db"
+    conn = init_db(db_file, kmers_6, kmer_size=6)
+
+    results = [
+        {
+            "seq_name": "chr1",
+            "start": 0,
+            "end": 100,
+            "window_size": 100,
+            "counts": {"AAAAAA": 5, "CCCCCC": 2},
+        }
+    ]
+    write_counts_db(conn, "genome6.fa", results, kmers_6, kmer_size=6)
+    conn.close()
+
+    df = load_counts_data(db_file)
+    assert len(df) == 1
+    assert df["library_name"].iloc[0] == "genome6.fa"
+    assert df["seq_name"].iloc[0] == "chr1"
+    assert df["AAAAAA"].iloc[0] == 5
+    assert df["CCCCCC"].iloc[0] == 2
+    assert df["GGGGGG"].iloc[0] == 0
+    assert len(df.columns) == 5 + 4096
 
 
 def test_write_counts_beg(tmp_path: Path) -> None:
