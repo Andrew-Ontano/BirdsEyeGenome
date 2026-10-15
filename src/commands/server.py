@@ -121,8 +121,12 @@ def build_figure(
         title=f"Genomic Signature: {seq_name}{title_suffix}",
         xaxis=dict(
             title="Genomic Position (bp)",
-            range=[x_min, x_max],
+            minallowed=x_min,
+            maxallowed=x_max,
             constrain="domain",
+            rangeslider=dict(
+                visible=True
+            ),
         ),
         yaxis=dict(
             title="Proportion",
@@ -144,14 +148,14 @@ def build_figure(
 
 
 def create_app(
-    initial_file: str | None = None,
+    initial_file: str = None,
     input_format: str = "auto",
     reloadable: bool = False,
 ) -> dash.Dash:
     """Create and configure the Dash browser application.
 
     Args:
-        initial_file (str | None): Path to initial dataset file.
+        initial_file (str): Path to initial dataset file.
         input_format (str): Input format ("auto", "beg", "db").
         reloadable (bool): Allow attaching new data files in UI.
 
@@ -244,10 +248,12 @@ def create_app(
                     dcc.Dropdown(
                         id="decimate-dropdown",
                         options=[
+                            {"label": "100 windows", "value": 100},
                             {"label": "500 windows", "value": 500},
                             {"label": "1,000 windows (default)", "value": 1000},
                             {"label": "2,500 windows", "value": 2500},
                             {"label": "5,000 windows", "value": 5000},
+                            {"label": "10,000 windows", "value": 10000},
                             {"label": "No downsampling (All)", "value": 0},
                         ],
                         value=1000,

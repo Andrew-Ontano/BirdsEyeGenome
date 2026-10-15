@@ -21,7 +21,7 @@ def read_genome(
     """Check that the input file exists and load sequence records via Biopython SeqIO.
 
     Args:
-        input_file (str | Path): Path to the input genomic sequence file.
+        input_file (str): Path to the input genomic sequence file.
         input_format (str, optional): Input sequence file format recognized by SeqIO.
             Defaults to "fasta".
 
@@ -132,7 +132,7 @@ def init_db(db_path: str, kmers: list[str]) -> sqlite3.Connection:
     """Initialize SQLite database with a tabulation table for k-mer counts.
 
     Args:
-        db_path (str | Path): Path to SQLite database file.
+        db_path (str): Path to SQLite database file.
         kmers (list[str]): List of k-mer names to include as count columns.
 
     Returns:
@@ -208,8 +208,8 @@ def write_counts_beg(
     """Write window count results to a tab-separated BEG file with comment metadata.
 
     Args:
-        output_file (str | Path): Path to destination BEG file.
-        input_file (str | Path): Total path to the input sequence file.
+        output_file (str): Path to destination BEG file.
+        input_file (str): Total path to the input sequence file.
         library_name (str): Shortened library name.
         kmers (list[str]): List of k-mers.
         results (list[dict[str, Any]]): List of window count result dictionaries.
@@ -330,11 +330,11 @@ def get_canonical_kmer(kmer: str) -> str:
     return min(kmer, rc)
 
 
-def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
+def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
     """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
 
     Args:
-        file_path (str | Path): Path to the .beg or .db file.
+        file_path (str): Path to the .beg or .db file.
         file_format (str): "beg", "db", or "auto" to infer from file extension.
 
     Returns:
@@ -425,7 +425,7 @@ def process_window_proportions(
     total_counts = counts_df[feature_cols].sum(axis=1)
     norm_denom = total_counts.replace(0, 1)
 
-    for col in feature_cols:
-        processed_df[col] = counts_df[col] / norm_denom
+    normalized_features = counts_df[feature_cols].div(norm_denom, axis=0)
+    processed_df = pd.concat([processed_df, normalized_features], axis=1)
 
     return processed_df, feature_cols, color_map
