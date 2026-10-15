@@ -110,10 +110,25 @@ def build_figure(
     if show_n_gaps:
         title_suffix += " [N-Gaps Enabled]"
 
+    x_min = min(1, int(proc_df["window_start"].min())) if not proc_df.empty else 1
+    if "window_stop" in proc_df.columns:
+        x_max = int(proc_df["window_stop"].max())
+    else:
+        x_max = int(x_vals[-1]) if len(x_vals) > 0 else 1
+
     fig.update_layout(
+        dragmode="pan",
         title=f"Genomic Signature: {seq_name}{title_suffix}",
-        xaxis=dict(title="Genomic Position (bp)"),
-        yaxis=dict(title="Proportion", range=[0, 1], fixedrange=True),
+        xaxis=dict(
+            title="Genomic Position (bp)",
+            range=[x_min, x_max],
+            constrain="domain",
+        ),
+        yaxis=dict(
+            title="Proportion",
+            range=[0, 1],
+            fixedrange=True,
+        ),
         template="plotly_white",
         legend=dict(
             orientation="v",
@@ -123,21 +138,20 @@ def build_figure(
             x=1.02,
         ),
         margin=dict(l=60, r=160, t=60, b=60),
-        dragmode="pan"
     )
 
     return fig
 
 
 def create_app(
-    initial_file: str = "",
+    initial_file: str | None = None,
     input_format: str = "auto",
     reloadable: bool = False,
 ) -> dash.Dash:
     """Create and configure the Dash browser application.
 
     Args:
-        initial_file (str): Path to initial dataset file.
+        initial_file (str | None): Path to initial dataset file.
         input_format (str): Input format ("auto", "beg", "db").
         reloadable (bool): Allow attaching new data files in UI.
 
