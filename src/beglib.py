@@ -1,5 +1,6 @@
 """Birds Eye Genome core library module."""
 
+from __future__ import annotations
 import itertools
 import sqlite3
 from collections.abc import Iterable, Iterator
@@ -12,7 +13,7 @@ import numpy as np
 import pandas as pd
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
-
+import json
 
 def read_genome(
     input_file: str,
@@ -129,16 +130,6 @@ def count_mers(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def init_db(db_path: str, kmers: list[str] | None = None, kmer_size: int = 3) -> sqlite3.Connection:
-    """Initialize SQLite database with normalized metadata, windows, and k-mer count tables.
-
-    Args:
-        db_path (str): Path to SQLite database file.
-        kmers (list[str], optional): List of k-mer strings. Used to infer kmer_size if provided.
-        kmer_size (int, optional): Size of k-mers. Defaults to 3.
-
-    Returns:
-        sqlite3.Connection: Active connection to the created database.
-    """
     db_file = Path(db_path)
     if db_file.exists():
         db_file.unlink()
@@ -153,6 +144,7 @@ def init_db(db_path: str, kmers: list[str] | None = None, kmer_size: int = 3) ->
     )
     """)
 
+    # Added the 'counts' BLOB column
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS windows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,24 +152,17 @@ def init_db(db_path: str, kmers: list[str] | None = None, kmer_size: int = 3) ->
         seq_name TEXT,
         window_start INTEGER,
         window_stop INTEGER,
-        window_size INTEGER
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS kmer_counts (
-        window_id INTEGER,
-        kmer TEXT,
-        count INTEGER,
-        FOREIGN KEY(window_id) REFERENCES windows(id)
+        window_size INTEGER,
+        counts BLOB 
     )
     """)
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_windows_seq_name ON windows(seq_name)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kmer_counts_window_id ON kmer_counts(window_id)")
 
     if kmers and len(kmers) > 0:
         inferred_kmer_size = len(kmers[0])
+        # Save the exact order of kmers so we can decode the binary array later
+        cursor.execute("INSERT INTO metadata (key, value) VALUES (?, ?)", ("kmers_list", json.dumps(kmers)))
     else:
         inferred_kmer_size = kmer_size
 
@@ -187,21 +172,12 @@ def init_db(db_path: str, kmers: list[str] | None = None, kmer_size: int = 3) ->
 
 
 def write_counts_db(
-    conn: sqlite3.Connection,
-    library_name: str,
-    results: list[dict[str, Any]],
-    kmers: list[str],
-    kmer_size: int | None = None,
+        conn: sqlite3.Connection,
+        library_name: str,
+        results: list[dict[str, Any]],
+        kmers: list[str],
+        kmer_size: int | None = None,
 ) -> None:
-    """Insert window count results into the SQLite database tables using sparse storage.
-
-    Args:
-        conn (sqlite3.Connection): Active SQLite database connection.
-        library_name (str): Shortened library name (e.g. filename).
-        results (list[dict[str, Any]]): List of window count result dictionaries.
-        kmers (list[str]): List of k-mers.
-        kmer_size (int, optional): Size of k-mers. If None, derived from kmers.
-    """
     cursor = conn.cursor()
 
     if kmer_size is None and kmers and len(kmers) > 0:
@@ -212,28 +188,36 @@ def write_counts_db(
     cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("kmer_size", str(kmer_size)))
     cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", ("library_name", library_name))
 
-    kmer_count_rows = []
-    for res in results:
-        cursor.execute(
-            "INSERT INTO windows (library_name, seq_name, window_start, window_stop, window_size) VALUES (?, ?, ?, ?, ?)",
-            (
-                library_name,
-                res["seq_name"],
-                res["start"] + 1,
-                res["end"],
-                res["window_size"],
-            ),
-        )
-        window_id = cursor.lastrowid
-        counts = res.get("counts", {})
-        for kmer, count in counts.items():
-            if count > 0:
-                kmer_count_rows.append((window_id, kmer, count))
+    # Create a quick lookup map to place counts in the correct array index
+    kmer_to_idx = {kmer: i for i, kmer in enumerate(kmers)}
+    num_kmers = len(kmers)
 
-    if kmer_count_rows:
+    window_rows = []
+
+    for res in results:
+        # Initialize a dense array of zeros
+        # uint32 allows counts up to 4.2 billion; use uint16 if max count < 65,535 for half the storage
+        dense_counts = np.zeros(num_kmers, dtype=np.uint32)
+
+        counts_dict = res.get("counts", {})
+        for kmer, count in counts_dict.items():
+            if count > 0 and kmer in kmer_to_idx:
+                dense_counts[kmer_to_idx[kmer]] = count
+
+        window_rows.append((
+            library_name,
+            res["seq_name"],
+            res["start"] + 1,
+            res["end"],
+            res["window_size"],
+            dense_counts.tobytes()  # Convert the numpy array directly to binary
+        ))
+
+    if window_rows:
+        # One single executemany handles everything
         cursor.executemany(
-            "INSERT INTO kmer_counts (window_id, kmer, count) VALUES (?, ?, ?)",
-            kmer_count_rows,
+            "INSERT INTO windows (library_name, seq_name, window_start, window_stop, window_size, counts) VALUES (?, ?, ?, ?, ?, ?)",
+            window_rows,
         )
 
     conn.commit()
@@ -397,48 +381,105 @@ def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
         has_windows_table = cursor.fetchone() is not None
 
         if has_windows_table:
-            kmer_size = 3
-            try:
-                cursor.execute("SELECT value FROM metadata WHERE key = 'kmer_size'")
-                row = cursor.fetchone()
-                if row and row[0]:
-                    kmer_size = int(row[0])
-            except sqlite3.OperationalError:
-                pass
+            # Check if using the new BLOB schema by looking for the 'counts' column
+            cursor.execute("PRAGMA table_info(windows)")
+            columns = [col[1] for col in cursor.fetchall()]
+            is_dense_schema = "counts" in columns
 
-            windows_df = pd.read_sql_query(
-                "SELECT id, library_name, seq_name, window_start, window_stop, window_size FROM windows ORDER BY id ASC",
-                conn,
-            )
-            counts_df = pd.read_sql_query("SELECT window_id, kmer, count FROM kmer_counts", conn)
-            conn.close()
+            if is_dense_schema:
+                # --- NEW DENSE BLOB SCHEMA ---
+                try:
+                    cursor.execute("SELECT value FROM metadata WHERE key = 'kmers_list'")
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        kmers = json.loads(row[0])
+                    else:
+                        raise ValueError("Dense schema requires 'kmers_list' in metadata.")
+                except sqlite3.OperationalError:
+                    raise ValueError("Metadata table missing or corrupted.")
 
-            if windows_df.empty:
-                return pd.DataFrame()
+                # Fetch window metadata and the counts BLOB
+                cursor.execute(
+                    "SELECT library_name, seq_name, window_start, window_stop, window_size, counts "
+                    "FROM windows ORDER BY id ASC"
+                )
+                rows = cursor.fetchall()
+                conn.close()
 
-            if not counts_df.empty and "kmer" in counts_df.columns:
-                non_empty_kmers = counts_df["kmer"].dropna()
-                if not non_empty_kmers.empty:
-                    kmer_size = len(str(non_empty_kmers.iloc[0]))
+                if not rows:
+                    return pd.DataFrame()
 
-            all_kmers = set_mers(kmer_size)
+                # Pre-allocate lists for metadata and arrays for counts
+                meta_cols = {"library_name": [], "seq_name": [], "window_start": [], "window_stop": [],
+                             "window_size": []}
+                counts_list = []
 
-            if not counts_df.empty:
-                pivoted = counts_df.pivot(index="window_id", columns="kmer", values="count").fillna(0).astype(int)
+                for row in rows:
+                    meta_cols["library_name"].append(row[0])
+                    meta_cols["seq_name"].append(row[1])
+                    meta_cols["window_start"].append(row[2])
+                    meta_cols["window_stop"].append(row[3])
+                    meta_cols["window_size"].append(row[4])
+
+                    if row[5]:
+                        counts_list.append(np.frombuffer(row[5], dtype=np.uint32))
+                    else:
+                        counts_list.append(np.zeros(len(kmers), dtype=np.uint32))
+
+                # Build the dataframe from the vectorized array to prevent fragmentation
+                df_meta = pd.DataFrame(meta_cols)
+                df_counts = pd.DataFrame(np.vstack(counts_list), columns=kmers)
+
+                # Combine metadata and counts block
+                df = pd.concat([df_meta, df_counts], axis=1)
+
             else:
-                pivoted = pd.DataFrame(index=windows_df["id"])
+                # --- OLD SPARSE EAV SCHEMA (Backwards compatibility) ---
+                kmer_size = 3
+                try:
+                    cursor.execute("SELECT value FROM metadata WHERE key = 'kmer_size'")
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        kmer_size = int(row[0])
+                except sqlite3.OperationalError:
+                    pass
 
-            pivoted = pivoted.reindex(columns=all_kmers, fill_value=0)
-            df = windows_df.merge(pivoted, left_on="id", right_index=True, how="left")
-            df = df.fillna(0)
-            if "id" in df.columns:
-                df = df.drop(columns=["id"])
+                windows_df = pd.read_sql_query(
+                    "SELECT id, library_name, seq_name, window_start, window_stop, window_size FROM windows ORDER BY id ASC",
+                    conn,
+                )
+                counts_df = pd.read_sql_query("SELECT window_id, kmer, count FROM kmer_counts", conn)
+                conn.close()
+
+                if windows_df.empty:
+                    return pd.DataFrame()
+
+                if not counts_df.empty and "kmer" in counts_df.columns:
+                    non_empty_kmers = counts_df["kmer"].dropna()
+                    if not non_empty_kmers.empty:
+                        kmer_size = len(str(non_empty_kmers.iloc[0]))
+
+                # Note: Assumes `set_mers` is imported/available in your file scope
+                all_kmers = set_mers(kmer_size)
+
+                if not counts_df.empty:
+                    pivoted = counts_df.pivot(index="window_id", columns="kmer", values="count").fillna(0).astype(int)
+                else:
+                    pivoted = pd.DataFrame(index=windows_df["id"])
+
+                pivoted = pivoted.reindex(columns=all_kmers, fill_value=0)
+                df = windows_df.merge(pivoted, left_on="id", right_index=True, how="left")
+                df = df.fillna(0)
+                if "id" in df.columns:
+                    df = df.drop(columns=["id"])
         else:
+            # Absolute fallback
             df = pd.read_sql_query("SELECT * FROM kmer_counts ORDER BY id ASC", conn)
             conn.close()
             if "id" in df.columns:
                 df = df.drop(columns=["id"])
     else:
+        # TSV Path
         df = pd.read_csv(str(path), sep="\t", comment="#")
 
     return df
