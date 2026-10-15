@@ -11,7 +11,7 @@ from Bio.SeqRecord import SeqRecord
 
 
 def read_genome(
-    input_file: str | Path,
+    input_file: str,
     input_format: str = "fasta",
 ) -> Iterator[SeqRecord]:
     """Check that the input file exists and load sequence records via Biopython SeqIO.
@@ -124,7 +124,7 @@ def count_mers(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def init_db(db_path: str | Path, kmers: list[str]) -> sqlite3.Connection:
+def init_db(db_path: str, kmers: list[str]) -> sqlite3.Connection:
     """Initialize SQLite database with a tabulation table for k-mer counts.
 
     Args:
@@ -184,7 +184,7 @@ def write_counts_db(
         row = [
             library_name,
             res["seq_name"],
-            res["start"],
+            res["start"]+1,
             res["end"],
             res["window_size"],
         ] + [counts.get(kmer, 0) for kmer in kmers]
@@ -195,8 +195,8 @@ def write_counts_db(
 
 
 def write_counts_beg(
-    output_file: str | Path,
-    input_file: str | Path,
+    output_file: str,
+    input_file: str,
     library_name: str,
     kmers: list[str],
     results: list[dict[str, Any]],
@@ -223,7 +223,7 @@ def write_counts_beg(
             row = [
                 library_name,
                 res["seq_name"],
-                str(res["start"]),
+                str(res["start"]+1),
                 str(res["end"]),
                 str(res["window_size"]),
             ] + [str(counts.get(kmer, 0)) for kmer in kmers]
