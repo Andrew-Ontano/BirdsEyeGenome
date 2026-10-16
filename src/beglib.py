@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+import concurrent.futures
 import itertools
 import json
 import matplotlib.colors as mcolors
@@ -13,6 +14,9 @@ import pandas as pd
 from pathlib import Path
 import sqlite3
 from typing import Any
+from hmmlearn.hmm import GaussianHMM
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 def read_genome(
     input_file: str,
@@ -567,18 +571,9 @@ def collapse_to_canonical(df: pd.DataFrame, kmer_cols: list[str]) -> pd.DataFram
         pd.DataFrame: DataFrame with redundant reverse complement k-mers merged into
             lexicographically smaller canonical k-mer columns.
     """
-    canonical_map: dict[str, list[str]] = {}
-    for kmer in kmer_cols:
-        canon = get_canonical_kmer(kmer)
-        canonical_map.setdefault(canon, []).append(kmer)
-
-    df_res = pd.DataFrame(index=df.index)
-    sorted_canons = sorted(canonical_map.keys(), key=kmer_sort_key)
-    for canon in sorted_canons:
-        cols_to_sum = canonical_map[canon]
-        df_res[canon] = df[cols_to_sum].sum(axis=1)
-
-    return df_res
+    canonical_map = {kmer: get_canonical_kmer(kmer) for kmer in kmer_cols}
+    # Vectorized column grouping and summation
+    return df[kmer_cols].groupby(canonical_map, axis=1).sum()
 
 
 def prepare_kmer_frequencies(
@@ -636,6 +631,40 @@ def parse_n_states(n_states_arg: str | int) -> list[int]:
     return [int(arg_str)]
 
 
+def _fit_hmm_state(
+        num_s: int,
+        pca_components: np.ndarray,
+        lengths: list[int] | None,
+        random_state: int,
+        feature_cols: list[str],
+        freq_df: pd.DataFrame
+) -> tuple[int, list[str], pd.DataFrame]:
+    """Worker function to fit HMM for a specific state count."""
+    from hmmlearn.hmm import GaussianHMM
+    effective_states = min(num_s, pca_components.shape[0])
+    hmm_model = GaussianHMM(
+        n_components=effective_states,
+        covariance_type="full",
+        random_state=random_state,
+        n_iter=100,
+    )
+
+    if lengths:
+        hmm_model.fit(pca_components, lengths=lengths)
+        domain_assignments = hmm_model.predict(pca_components, lengths=lengths)
+    else:
+        hmm_model.fit(pca_components)
+        domain_assignments = hmm_model.predict(pca_components)
+
+    assignments = [f"Domain_{s}" for s in domain_assignments]
+
+    temp_df = pd.DataFrame({"Domain_ID": assignments})
+    prof = aggregate_domain_frequencies(temp_df, feature_cols, freq_df)
+    prof.insert(0, "Expected_States", num_s)
+
+    return num_s, assignments, prof
+
+
 def identify_regional_domains(
     df: pd.DataFrame,
     kmer_cols: list[str],
@@ -643,6 +672,7 @@ def identify_regional_domains(
     n_states: int | str = 4,
     variance_target: float = 0.90,
     random_state: int = 42,
+    threads: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Segment genomic windows into hidden Markov model domain states based on k-mer composition.
 
@@ -664,9 +694,6 @@ def identify_regional_domains(
               `window_start`, `window_stop`, `window_size`), `comment`, and `Expected_{N}` columns.
             - Combined domain profiles DataFrame containing mean k-mer frequencies for each domain.
     """
-    from hmmlearn.hmm import GaussianHMM
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
 
     if df.empty:
         raise ValueError("Input DataFrame is empty.")
@@ -714,34 +741,23 @@ def identify_regional_domains(
     lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
 
     profile_frames = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = {
+            executor.submit(
+                _fit_hmm_state, num_s, pca_components, lengths, random_state, feature_cols, freq_df
+            ): num_s
+            for num_s in state_list
+        }
 
-    # Iterate over all requested state expectations
-    for num_s in state_list:
-        effective_states = min(num_s, pca_components.shape[0])
-        hmm_model = GaussianHMM(
-            n_components=effective_states,
-            covariance_type="full",
-            random_state=random_state,
-            n_iter=100,
-        )
+        for future in concurrent.futures.as_completed(futures):
+            num_s, assignments, prof = future.result()
+            col_name = f"Expected_{num_s}"
+            df_results[col_name] = assignments
+            profile_frames.append(prof)
 
-        if lengths:
-            hmm_model.fit(pca_components, lengths=lengths)
-            domain_assignments = hmm_model.predict(pca_components, lengths=lengths)
-        else:
-            hmm_model.fit(pca_components)
-            domain_assignments = hmm_model.predict(pca_components)
-
-        col_name = f"Expected_{num_s}"
-        df_results[col_name] = [f"Domain_{s}" for s in domain_assignments]
-
-        # Aggregate summary profile for this expected state count
-        temp_df = pd.DataFrame({"Domain_ID": df_results[col_name].values})
-        prof = aggregate_domain_frequencies(temp_df, feature_cols, freq_df)
-        prof.insert(0, "Expected_States", num_s)
-        profile_frames.append(prof)
-
-    combined_profiles = pd.concat(profile_frames, ignore_index=True)
+    # Sort results to ensure deterministic column order
+    df_results = df_results.reindex(sorted(df_results.columns), axis=1)
+    combined_profiles = pd.concat(profile_frames, ignore_index=True).sort_values(by="Expected_States")
 
     return df_results, combined_profiles
 

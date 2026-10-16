@@ -329,6 +329,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Save run parameters and domain assignments to SQLite 'domains' table.",
     )
+    parser_domains.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of threads for parallel processing of HMM states.",
+    )
     parser_domains.set_defaults(func=run_domains)
 
     return parser
