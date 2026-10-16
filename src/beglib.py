@@ -613,29 +613,57 @@ def prepare_kmer_frequencies(
     return freq_df, feature_cols
 
 
+def parse_n_states(n_states_arg: str | int) -> list[int]:
+    """Parse n_states argument into a list of integer state numbers.
+
+    Supports singular integer values (e.g., "4" or 4) or colon-separated ranges
+    (e.g., "3:10"), inclusive of limits.
+
+    Args:
+        n_states_arg (str | int): Singular integer or range string "A:B".
+
+    Returns:
+        list[int]: Sorted list of state numbers.
+    """
+    arg_str = str(n_states_arg).strip()
+    if ":" in arg_str:
+        parts = arg_str.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid range format for n-states: '{n_states_arg}'. Expected 'start:stop'.")
+        start, stop = int(parts[0]), int(parts[1])
+        if start > stop:
+            raise ValueError(f"Invalid range for n-states: '{n_states_arg}'. Start ({start}) > stop ({stop}).")
+        return list(range(start, stop + 1))
+    return [int(arg_str)]
+
+
 def identify_regional_domains(
     df: pd.DataFrame,
     kmer_cols: list[str],
     use_canonical: bool = False,
-    n_states: int = 4,
+    n_states: int | str = 4,
     variance_target: float = 0.90,
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Segment genomic windows into hidden Markov model domain states based on k-mer composition.
 
+    Supports evaluating a single state count or iterating across a range of expected state values.
+
     Args:
         df (pd.DataFrame): Input genomic window DataFrame containing metadata and k-mer counts.
         kmer_cols (list[str]): List of k-mer count column names.
         use_canonical (bool): Collapse reverse complement k-mers if True. Defaults to False.
-        n_states (int): Number of HMM states / domain types to infer. Defaults to 4.
+        n_states (int | str): Number of HMM states or range string "A:B" (e.g. "3:10").
+            Defaults to 4.
         variance_target (float): Variance ratio target for PCA dimensionality reduction.
             Defaults to 0.90.
         random_state (int): Seed for HMM initialization reproducible results.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]:
-            - Updated DataFrame with `Domain_ID`, `Domain_Label`, and `comment` columns.
-            - Domain profiles DataFrame containing mean k-mer frequencies for each domain.
+            - Truncated window DataFrame with localization columns (`library_name`, `seq_name`,
+              `window_start`, `window_stop`, `window_size`), `comment`, and `Expected_{N}` columns.
+            - Combined domain profiles DataFrame containing mean k-mer frequencies for each domain.
     """
     from hmmlearn.hmm import GaussianHMM
     from sklearn.decomposition import PCA
@@ -644,17 +672,26 @@ def identify_regional_domains(
     if df.empty:
         raise ValueError("Input DataFrame is empty.")
 
+    state_list = parse_n_states(n_states)
+
+    meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size"]
+    loc_cols = [c for c in meta_cols if c in df.columns]
+
+    # Prepare truncated output DataFrame
+    df_results = df[loc_cols].copy() if loc_cols else pd.DataFrame(index=df.index)
+
     # 1. Prepare k-mer relative frequencies
     freq_df, feature_cols = prepare_kmer_frequencies(df, kmer_cols, use_canonical=use_canonical)
 
     # Detect zero/empty windows (e.g. N-gaps)
     zero_mask = freq_df.sum(axis=1) == 0.0
 
+    # Set comments for zero/N-gap windows
+    df_results["comment"] = ["N-gap present" if zero_mask.iloc[i] else "" for i in range(len(df))]
+
     # 2. Handle missing/empty windows via forward/backward fill interpolation
     model_freq_df = freq_df.copy()
     if zero_mask.any():
-        # Replace zero rows with NaN, interpolate linearly across contiguous genomic windows,
-        # and fill any remaining edge NaNs with 0 (or column mean)
         model_freq_df.loc[zero_mask, :] = np.nan
         model_freq_df = model_freq_df.ffill().bfill().fillna(0.0)
 
@@ -662,7 +699,6 @@ def identify_regional_domains(
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(model_freq_df)
 
-    # Ensure n_components does not exceed min(n_samples, n_features)
     max_components = min(scaled_data.shape[0], scaled_data.shape[1])
     if max_components < 1:
         raise ValueError("Not enough features or samples for PCA.")
@@ -676,41 +712,39 @@ def identify_regional_domains(
     pca = PCA(n_components=pca_target, random_state=random_state)
     pca_components = pca.fit_transform(scaled_data)
 
-    # 4. Fit HMM state segmentation per sequence or across entire dataset
-    effective_states = min(n_states, pca_components.shape[0])
-    hmm_model = GaussianHMM(
-        n_components=effective_states,
-        covariance_type="full",
-        random_state=random_state,
-        n_iter=100,
-    )
+    lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
 
-    # Fit and predict hidden state sequences
-    # Group lengths by sequence so HMM transition probabilities respect sequence boundaries
-    if "seq_name" in df.columns:
-        lengths = df.groupby("seq_name", sort=False).size().tolist()
-        hmm_model.fit(pca_components, lengths=lengths)
-        domain_assignments = hmm_model.predict(pca_components, lengths=lengths)
-    else:
-        hmm_model.fit(pca_components)
-        domain_assignments = hmm_model.predict(pca_components)
+    profile_frames = []
 
-    # 5. Attach state assignments and labels back to original dataset
-    df_results = df.copy()
-    df_results["Domain_ID"] = [f"Domain_{state}" for state in domain_assignments]
-    df_results["Domain_Label"] = df_results["Domain_ID"]
+    # Iterate over all requested state expectations
+    for num_s in state_list:
+        effective_states = min(num_s, pca_components.shape[0])
+        hmm_model = GaussianHMM(
+            n_components=effective_states,
+            covariance_type="full",
+            random_state=random_state,
+            n_iter=100,
+        )
 
-    # Set comments for zero/N-gap windows
-    comments = ["" for _ in range(len(df_results))]
-    for idx in range(len(df_results)):
-        if zero_mask.iloc[idx]:
-            comments[idx] = "N-gap present"
-    df_results["comment"] = comments
+        if lengths:
+            hmm_model.fit(pca_components, lengths=lengths)
+            domain_assignments = hmm_model.predict(pca_components, lengths=lengths)
+        else:
+            hmm_model.fit(pca_components)
+            domain_assignments = hmm_model.predict(pca_components)
 
-    # 6. Aggregate domain k-mer frequency profiles using actual non-interpolated frequencies
-    domain_profiles = aggregate_domain_frequencies(df_results, feature_cols, freq_df)
+        col_name = f"Expected_{num_s}"
+        df_results[col_name] = [f"Domain_{s}" for s in domain_assignments]
 
-    return df_results, domain_profiles
+        # Aggregate summary profile for this expected state count
+        temp_df = pd.DataFrame({"Domain_ID": df_results[col_name].values})
+        prof = aggregate_domain_frequencies(temp_df, feature_cols, freq_df)
+        prof.insert(0, "Expected_States", num_s)
+        profile_frames.append(prof)
+
+    combined_profiles = pd.concat(profile_frames, ignore_index=True)
+
+    return df_results, combined_profiles
 
 
 def aggregate_domain_frequencies(
@@ -748,8 +782,8 @@ def write_domains_db(
         conn (sqlite3.Connection): Active SQLite connection.
         run_id (str): Unique identifier string for this run parameterization.
         df_results (pd.DataFrame): Window assignments containing seq_name, window_start,
-            window_stop, Domain_ID, Domain_Label, comment.
-        domain_profiles (pd.DataFrame): Summary table of mean k-mer frequencies per Domain_ID.
+            window_stop, comment, and Expected_{N} columns.
+        domain_profiles (pd.DataFrame): Summary table of mean k-mer frequencies per domain.
         params (dict[str, Any], optional): Dictionary of parameter metadata to log.
     """
     cursor = conn.cursor()
@@ -769,8 +803,7 @@ def write_domains_db(
         seq_name TEXT,
         window_start INTEGER,
         window_stop INTEGER,
-        domain_id TEXT,
-        domain_label TEXT,
+        assignments_json TEXT,
         comment TEXT,
         FOREIGN KEY(run_id) REFERENCES domain_runs(run_id)
     )
@@ -780,6 +813,7 @@ def write_domains_db(
     CREATE TABLE IF NOT EXISTS domain_profiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         run_id TEXT,
+        expected_states INTEGER,
         domain_id TEXT,
         profile_json TEXT,
         FOREIGN KEY(run_id) REFERENCES domain_runs(run_id)
@@ -799,41 +833,45 @@ def write_domains_db(
     cursor.execute("DELETE FROM domains WHERE run_id = ?", (run_id,))
     cursor.execute("DELETE FROM domain_profiles WHERE run_id = ?", (run_id,))
 
+    expected_cols = [c for c in df_results.columns if c.startswith("Expected_")]
+
     # Insert window domain assignments
     domain_rows = []
     for _, row in df_results.iterrows():
+        assign_dict = {col: str(row[col]) for col in expected_cols}
         domain_rows.append((
             run_id,
             str(row.get("seq_name", "")),
             int(row.get("window_start", 0)),
             int(row.get("window_stop", 0)),
-            str(row.get("Domain_ID", "")),
-            str(row.get("Domain_Label", "")),
+            json.dumps(assign_dict),
             str(row.get("comment", "")),
         ))
 
     if domain_rows:
         cursor.executemany(
-            "INSERT INTO domains (run_id, seq_name, window_start, window_stop, domain_id, domain_label, comment) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO domains (run_id, seq_name, window_start, window_stop, assignments_json, comment) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             domain_rows,
         )
 
     # Insert domain profiles
-    feature_cols = [c for c in domain_profiles.columns if c != "Domain_ID"]
+    feature_cols = [c for c in domain_profiles.columns if c not in ("Expected_States", "Domain_ID")]
     profile_rows = []
     for _, row in domain_profiles.iterrows():
+        exp_s = int(row.get("Expected_States", 0))
         domain_id = str(row["Domain_ID"])
         p_dict = {col: float(row[col]) for col in feature_cols}
         profile_rows.append((
             run_id,
+            exp_s,
             domain_id,
             json.dumps(p_dict),
         ))
 
     if profile_rows:
         cursor.executemany(
-            "INSERT INTO domain_profiles (run_id, domain_id, profile_json) VALUES (?, ?, ?)",
+            "INSERT INTO domain_profiles (run_id, expected_states, domain_id, profile_json) VALUES (?, ?, ?, ?)",
             profile_rows,
         )
 

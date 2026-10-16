@@ -38,12 +38,12 @@ def run_domains(args) -> None:
             sys.exit(1)
 
         use_canonical = getattr(args, "canonical", False)
-        n_states = getattr(args, "n_states", 4)
+        n_states = getattr(args, "n_states", "4")
         variance_target = getattr(args, "variance_target", 0.90)
 
         logger.info(
-            "Running domain identification: n_states=%d, variance_target=%.2f, canonical=%s",
-            n_states,
+            "Running domain identification: n_states=%s, variance_target=%.2f, canonical=%s",
+            str(n_states),
             variance_target,
             use_canonical,
         )
@@ -78,7 +78,7 @@ def run_domains(args) -> None:
             run_id = f"run_n{n_states}_v{variance_target}_c{int(use_canonical)}"
             conn = sqlite3.connect(output_file)
             params = {
-                "n_states": n_states,
+                "n_states": str(n_states),
                 "variance_target": variance_target,
                 "canonical": use_canonical,
                 "input_file": str(input_path.resolve()),
@@ -100,7 +100,7 @@ def run_domains(args) -> None:
             run_id = f"run_n{n_states}_v{variance_target}_c{int(use_canonical)}"
             conn = sqlite3.connect(db_file)
             params = {
-                "n_states": n_states,
+                "n_states": str(n_states),
                 "variance_target": variance_target,
                 "canonical": use_canonical,
                 "input_file": str(input_path.resolve()),

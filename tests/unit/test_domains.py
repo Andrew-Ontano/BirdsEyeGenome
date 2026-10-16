@@ -66,22 +66,37 @@ def test_identify_regional_domains(mock_kmer_df: pd.DataFrame) -> None:
         df=mock_kmer_df,
         kmer_cols=kmer_cols,
         use_canonical=False,
-        n_states=2,
+        n_states="2",
         variance_target=0.90,
     )
 
-    assert "Domain_ID" in df_results.columns
-    assert "Domain_Label" in df_results.columns
+    assert "Expected_2" in df_results.columns
     assert "comment" in df_results.columns
+    assert "AAA" not in df_results.columns  # Truncated output check
 
     # Verify N-gap comment for 5th window (index 4)
     assert df_results["comment"].iloc[4] == "N-gap present"
     assert df_results["comment"].iloc[0] == ""
 
     # Verify domain profiles summary table structure
+    assert "Expected_States" in domain_profiles.columns
     assert "Domain_ID" in domain_profiles.columns
     assert len(domain_profiles) == 2
     assert set(kmer_cols).issubset(set(domain_profiles.columns))
+
+
+def test_identify_regional_domains_range(mock_kmer_df: pd.DataFrame) -> None:
+    """Test identify_regional_domains with range of states (e.g. '2:3')."""
+    kmer_cols = ["AAA", "TTT", "CCC", "GGG", "AAC", "GTT"]
+    df_results, domain_profiles = identify_regional_domains(
+        df=mock_kmer_df,
+        kmer_cols=kmer_cols,
+        n_states="1:2",
+    )
+
+    assert "Expected_1" in df_results.columns
+    assert "Expected_2" in df_results.columns
+    assert len(domain_profiles) == 3  # 1 for state count 1, 2 for state count 2
 
 
 def test_write_domains_db(tmp_path, mock_kmer_df: pd.DataFrame) -> None:
@@ -90,7 +105,7 @@ def test_write_domains_db(tmp_path, mock_kmer_df: pd.DataFrame) -> None:
     df_results, domain_profiles = identify_regional_domains(
         df=mock_kmer_df,
         kmer_cols=kmer_cols,
-        n_states=2,
+        n_states="2",
     )
 
     db_path = tmp_path / "domains.db"
@@ -102,7 +117,7 @@ def test_write_domains_db(tmp_path, mock_kmer_df: pd.DataFrame) -> None:
         run_id=run_id,
         df_results=df_results,
         domain_profiles=domain_profiles,
-        params={"n_states": 2},
+        params={"n_states": "2"},
     )
 
     cursor = conn.cursor()
@@ -111,12 +126,12 @@ def test_write_domains_db(tmp_path, mock_kmer_df: pd.DataFrame) -> None:
     assert len(runs) == 1
     assert runs[0][0] == "test_run_1"
 
-    cursor.execute("SELECT run_id, seq_name, domain_id, comment FROM domains WHERE run_id = ?", (run_id,))
+    cursor.execute("SELECT run_id, seq_name, assignments_json, comment FROM domains WHERE run_id = ?", (run_id,))
     domain_rows = cursor.fetchall()
     assert len(domain_rows) == 10
     assert domain_rows[4][3] == "N-gap present"
 
-    cursor.execute("SELECT run_id, domain_id, profile_json FROM domain_profiles WHERE run_id = ?", (run_id,))
+    cursor.execute("SELECT run_id, expected_states, domain_id, profile_json FROM domain_profiles WHERE run_id = ?", (run_id,))
     profile_rows = cursor.fetchall()
     assert len(profile_rows) == 2
 

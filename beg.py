@@ -307,10 +307,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser_domains.add_argument(
         "-n",
         "--n-states",
-        type=int,
+        type=str,
         required=False,
-        default=4,
-        help="Number of expected domain identities / HMM states (default: 4).",
+        default="4",
+        help="Number or range (e.g., '4' or '3:10') of expected domain identities / HMM states (default: '4').",
     )
     parser_domains.add_argument(
         "--variance-target",
