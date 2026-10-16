@@ -573,7 +573,7 @@ def collapse_to_canonical(df: pd.DataFrame, kmer_cols: list[str]) -> pd.DataFram
     """
     canonical_map = {kmer: get_canonical_kmer(kmer) for kmer in kmer_cols}
     # Vectorized column grouping and summation
-    return df[kmer_cols].groupby(canonical_map, axis=1).sum()
+    return df[kmer_cols].T.groupby(canonical_map).sum().T
 
 
 def prepare_kmer_frequencies(
