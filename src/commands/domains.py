@@ -39,6 +39,7 @@ def run_domains(args) -> None:
         use_canonical = getattr(args, "canonical", False)
         n_states = getattr(args, "n_states", "4")
         variance_target = getattr(args, "variance_target", 0.90)
+        threads = getattr(args, "threads", 1)
 
         logger.info(
             "Running domain identification: n_states=%s, variance_target=%.2f, canonical=%s",
@@ -53,6 +54,7 @@ def run_domains(args) -> None:
             use_canonical=use_canonical,
             n_states=n_states,
             variance_target=variance_target,
+            threads=threads,
         )
 
         output_format = getattr(args, "output_format", "auto")
