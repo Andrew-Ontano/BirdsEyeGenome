@@ -3,7 +3,6 @@
 import base64
 import logging
 import math
-import sys
 import tempfile
 from io import StringIO
 from pathlib import Path
@@ -12,7 +11,7 @@ import dash
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback_context, dcc, html
+from dash import Input, Output, State, dcc, html
 
 import src.beglib as bl
 
@@ -100,7 +99,7 @@ def build_figure(
                 mode="lines",
                 name=col,
                 stackgroup="one",
-                line=dict(width=0.5, color=color),
+                line={"width": 0.5, "color": color},
                 fillcolor=color,
                 hovertemplate=f"<b>{col}</b>: %{{y:.3f}}<br>Pos: %{{x}}<extra></extra>",
             )
@@ -119,36 +118,36 @@ def build_figure(
     fig.update_layout(
         dragmode="pan",
         title=f"Genomic Signature: {seq_name}{title_suffix}",
-        xaxis=dict(
-            title="Genomic Position (bp)",
-            minallowed=x_min,
-            maxallowed=x_max,
-            constrain="domain",
-            rangeslider=dict(
-                visible=True
-            ),
-        ),
-        yaxis=dict(
-            title="Proportion",
-            range=[0, 1],
-            fixedrange=True,
-        ),
+        xaxis={
+            "title": "Genomic Position (bp)",
+            "minallowed": x_min,
+            "maxallowed": x_max,
+            "constrain": "domain",
+            "rangeslider": {
+                "visible": True
+            },
+        },
+        yaxis={
+            "title": "Proportion",
+            "range": [0, 1],
+            "fixedrange": True,
+        },
         template="plotly_white",
-        legend=dict(
-            orientation="v",
-            yanchor="top",
-            y=1,
-            xanchor="left",
-            x=1.02,
-        ),
-        margin=dict(l=60, r=160, t=60, b=60),
+        legend={
+            "orientation": "v",
+            "yanchor": "top",
+            "y": 1,
+            "xanchor": "left",
+            "x": 1.02,
+        },
+        margin={"l": 60, "r": 160, "t": 60, "b": 60},
     )
 
     return fig
 
 
 def create_app(
-    initial_file: str = None,
+    initial_file: str | None = None,
     input_format: str = "auto",
     reloadable: bool = False,
 ) -> dash.Dash:
@@ -299,7 +298,7 @@ def create_app(
         def handle_upload(contents, filename):
             if not contents or not filename:
                 return dash.no_update
-            content_type, content_string = contents.split(",")
+            _content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
 
             suffix = Path(filename).suffix.lower()
