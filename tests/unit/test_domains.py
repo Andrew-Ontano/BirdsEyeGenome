@@ -110,28 +110,27 @@ def test_write_domains_db(tmp_path, mock_kmer_df: pd.DataFrame) -> None:
 
     db_path = tmp_path / "domains.db"
     conn = sqlite3.connect(str(db_path))
-    run_id = "test_run_1"
 
     write_domains_db(
         conn=conn,
-        run_id=run_id,
         df_results=df_results,
         domain_profiles=domain_profiles,
-        params={"n_states": "2"},
+        params={"n_states": "2", "variance_target": 0.90, "canonical": False},
     )
 
     cursor = conn.cursor()
-    cursor.execute("SELECT run_id, params FROM domain_runs")
+    cursor.execute("SELECT run_id, expected_states FROM domain_runs")
     runs = cursor.fetchall()
     assert len(runs) == 1
-    assert runs[0][0] == "test_run_1"
+    run_id = runs[0][0]
+    assert run_id == "run_n2_v0.9_c0"
 
-    cursor.execute("SELECT run_id, seq_name, assignments_json, comment FROM domains WHERE run_id = ?", (run_id,))
+    cursor.execute("SELECT run_id, seq_name, domain_id, comment FROM domains WHERE run_id = ?", (run_id,))
     domain_rows = cursor.fetchall()
     assert len(domain_rows) == 10
     assert domain_rows[4][3] == "N-gap present"
 
-    cursor.execute("SELECT run_id, expected_states, domain_id, profile_json FROM domain_profiles WHERE run_id = ?", (run_id,))
+    cursor.execute("SELECT run_id, domain_id, profile_json FROM domain_profiles WHERE run_id = ?", (run_id,))
     profile_rows = cursor.fetchall()
     assert len(profile_rows) == 2
 

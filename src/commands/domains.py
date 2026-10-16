@@ -75,7 +75,6 @@ def run_domains(args) -> None:
         # Save main window output (TSV .beg or SQLite .db)
         if output_format == "db":
             logger.info("Writing domain window results and summary profiles to SQLite DB: %s", output_file)
-            run_id = f"run_n{n_states}_v{variance_target}_c{int(use_canonical)}"
             conn = sqlite3.connect(output_file)
             params = {
                 "n_states": str(n_states),
@@ -83,7 +82,7 @@ def run_domains(args) -> None:
                 "canonical": use_canonical,
                 "input_file": str(input_path.resolve()),
             }
-            bl.write_domains_db(conn, run_id, df_results, domain_profiles, params=params)
+            bl.write_domains_db(conn, df_results, domain_profiles, params=params)
             conn.close()
         else:
             logger.info("Writing domain window results to BEG TSV file: %s", output_file)
@@ -97,7 +96,6 @@ def run_domains(args) -> None:
         if db_output_flag and output_format != "db":
             db_file = str(input_path.with_name(f"{input_path.stem}_domains.db"))
             logger.info("Writing domain run to supplementary SQLite DB: %s", db_file)
-            run_id = f"run_n{n_states}_v{variance_target}_c{int(use_canonical)}"
             conn = sqlite3.connect(db_file)
             params = {
                 "n_states": str(n_states),
@@ -105,7 +103,7 @@ def run_domains(args) -> None:
                 "canonical": use_canonical,
                 "input_file": str(input_path.resolve()),
             }
-            bl.write_domains_db(conn, run_id, df_results, domain_profiles, params=params)
+            bl.write_domains_db(conn, df_results, domain_profiles, params=params)
             conn.close()
 
         logger.info("Successfully identified regional domains for %d windows.", len(df_results))

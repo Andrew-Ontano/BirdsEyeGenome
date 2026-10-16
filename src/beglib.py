@@ -771,16 +771,18 @@ def aggregate_domain_frequencies(
 
 def write_domains_db(
     conn: sqlite3.Connection,
-    run_id: str,
     df_results: pd.DataFrame,
     domain_profiles: pd.DataFrame,
     params: dict[str, Any] | None = None,
 ) -> None:
     """Write domain assignments and domain summary profiles to SQLite tables.
 
+    Runs are indexed deterministically per unique quality set (expected_states,
+    variance_target, canonical) to prevent duplicate run entries when executing
+    overlapping ranges or iterative commands.
+
     Args:
         conn (sqlite3.Connection): Active SQLite connection.
-        run_id (str): Unique identifier string for this run parameterization.
         df_results (pd.DataFrame): Window assignments containing seq_name, window_start,
             window_stop, comment, and Expected_{N} columns.
         domain_profiles (pd.DataFrame): Summary table of mean k-mer frequencies per domain.
@@ -791,6 +793,9 @@ def write_domains_db(
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS domain_runs (
         run_id TEXT PRIMARY KEY,
+        expected_states INTEGER,
+        variance_target REAL,
+        canonical INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         params TEXT
     )
@@ -803,7 +808,7 @@ def write_domains_db(
         seq_name TEXT,
         window_start INTEGER,
         window_stop INTEGER,
-        assignments_json TEXT,
+        domain_id TEXT,
         comment TEXT,
         FOREIGN KEY(run_id) REFERENCES domain_runs(run_id)
     )
@@ -813,7 +818,6 @@ def write_domains_db(
     CREATE TABLE IF NOT EXISTS domain_profiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         run_id TEXT,
-        expected_states INTEGER,
         domain_id TEXT,
         profile_json TEXT,
         FOREIGN KEY(run_id) REFERENCES domain_runs(run_id)
@@ -822,57 +826,64 @@ def write_domains_db(
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_domains_run_seq ON domains(run_id, seq_name)")
 
-    # Insert run metadata
-    params_json = json.dumps(params or {})
-    cursor.execute(
-        "INSERT OR REPLACE INTO domain_runs (run_id, params) VALUES (?, ?)",
-        (run_id, params_json),
-    )
-
-    # Clear previous domain results for this run_id if re-running
-    cursor.execute("DELETE FROM domains WHERE run_id = ?", (run_id,))
-    cursor.execute("DELETE FROM domain_profiles WHERE run_id = ?", (run_id,))
+    base_params = params or {}
+    variance_target = float(base_params.get("variance_target", 0.90))
+    canonical = 1 if base_params.get("canonical", False) else 0
 
     expected_cols = [c for c in df_results.columns if c.startswith("Expected_")]
 
-    # Insert window domain assignments
-    domain_rows = []
-    for _, row in df_results.iterrows():
-        assign_dict = {col: str(row[col]) for col in expected_cols}
-        domain_rows.append((
-            run_id,
-            str(row.get("seq_name", "")),
-            int(row.get("window_start", 0)),
-            int(row.get("window_stop", 0)),
-            json.dumps(assign_dict),
-            str(row.get("comment", "")),
-        ))
+    for col in expected_cols:
+        num_s = int(col.replace("Expected_", ""))
+        run_id = f"run_n{num_s}_v{variance_target}_c{canonical}"
 
-    if domain_rows:
-        cursor.executemany(
-            "INSERT INTO domains (run_id, seq_name, window_start, window_stop, assignments_json, comment) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            domain_rows,
+        run_params = dict(base_params)
+        run_params["n_states"] = num_s
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO domain_runs (run_id, expected_states, variance_target, canonical, params) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, num_s, variance_target, canonical, json.dumps(run_params)),
         )
 
-    # Insert domain profiles
-    feature_cols = [c for c in domain_profiles.columns if c not in ("Expected_States", "Domain_ID")]
-    profile_rows = []
-    for _, row in domain_profiles.iterrows():
-        exp_s = int(row.get("Expected_States", 0))
-        domain_id = str(row["Domain_ID"])
-        p_dict = {col: float(row[col]) for col in feature_cols}
-        profile_rows.append((
-            run_id,
-            exp_s,
-            domain_id,
-            json.dumps(p_dict),
-        ))
+        cursor.execute("DELETE FROM domains WHERE run_id = ?", (run_id,))
+        cursor.execute("DELETE FROM domain_profiles WHERE run_id = ?", (run_id,))
 
-    if profile_rows:
-        cursor.executemany(
-            "INSERT INTO domain_profiles (run_id, expected_states, domain_id, profile_json) VALUES (?, ?, ?, ?)",
-            profile_rows,
-        )
+        # Window rows for this state expectation
+        domain_rows = []
+        for _, row in df_results.iterrows():
+            domain_rows.append((
+                run_id,
+                str(row.get("seq_name", "")),
+                int(row.get("window_start", 0)),
+                int(row.get("window_stop", 0)),
+                str(row.get(col, "")),
+                str(row.get("comment", "")),
+            ))
+
+        if domain_rows:
+            cursor.executemany(
+                "INSERT INTO domains (run_id, seq_name, window_start, window_stop, domain_id, comment) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                domain_rows,
+            )
+
+        # Profile rows for this state expectation
+        sub_profiles = domain_profiles[domain_profiles["Expected_States"] == num_s]
+        feature_cols = [c for c in sub_profiles.columns if c not in ("Expected_States", "Domain_ID")]
+        profile_rows = []
+        for _, row in sub_profiles.iterrows():
+            domain_id = str(row["Domain_ID"])
+            p_dict = {f_col: float(row[f_col]) for f_col in feature_cols}
+            profile_rows.append((
+                run_id,
+                domain_id,
+                json.dumps(p_dict),
+            ))
+
+        if profile_rows:
+            cursor.executemany(
+                "INSERT INTO domain_profiles (run_id, domain_id, profile_json) VALUES (?, ?, ?)",
+                profile_rows,
+            )
 
     conn.commit()
