@@ -1,9 +1,8 @@
 """Unit tests for src/commands/server.py."""
 
 import pandas as pd
-import pytest
-from dash import Dash
 import plotly.graph_objects as go
+from dash import Dash
 
 from src.commands.server import build_figure, create_app, decimate_dataframe
 

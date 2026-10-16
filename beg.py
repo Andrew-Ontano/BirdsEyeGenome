@@ -4,11 +4,10 @@
 import argparse
 import logging
 import sys
-
 from src.commands.count import run_count
+from src.commands.domains import run_domains
 from src.commands.plot import run_plot
 from src.commands.server import run_server
-
 
 def configure_logging(verbose: bool) -> None:
     """Configure standard logging level and format based on verbosity flag.
@@ -254,6 +253,83 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable attaching/reloading new BEG or DB data files in the web interface.",
     )
     parser_server.set_defaults(func=run_server)
+
+    # Subparser for domains
+    parser_domains = subparsers.add_parser(
+        "domains",
+        help="Identify and segment genomic regional domains via k-mer composition (PCA + HMM).",
+        description="Identify and segment genomic regional domains via k-mer composition (PCA + HMM).",
+        parents=[parent_parser],
+    )
+    parser_domains.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        required=True,
+        help="Path to input BEG file or SQLite database.",
+    )
+    parser_domains.add_argument(
+        "-f",
+        "--input-format",
+        type=str,
+        required=False,
+        default="auto",
+        choices=["auto", "beg", "db"],
+        help="Input file format.",
+    )
+    parser_domains.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        required=False,
+        default=None,
+        help="Path to output labeled BEG file or SQLite database.",
+    )
+    parser_domains.add_argument(
+        "-s",
+        "--summary-output",
+        type=str,
+        required=False,
+        default=None,
+        help="Path to output summary TSV file for domain profiles.",
+    )
+    parser_domains.add_argument(
+        "-p",
+        "--output-format",
+        type=str,
+        required=False,
+        default="auto",
+        choices=["auto", "beg", "db"],
+        help="Output format. Options: auto, beg, db.",
+    )
+    parser_domains.add_argument(
+        "-n",
+        "--n-states",
+        type=str,
+        required=False,
+        default="4",
+        help="Number or range (e.g., '4' or '3:10') of expected domain identities / HMM states (default: '4').",
+    )
+    parser_domains.add_argument(
+        "--variance-target",
+        type=float,
+        required=False,
+        default=0.90,
+        help="Variance ratio target for PCA dimensionality reduction (default: 0.90).",
+    )
+    parser_domains.add_argument(
+        "--canonical",
+        action="store_true",
+        default=False,
+        help="Collapse reverse complement k-mers into canonical set.",
+    )
+    parser_domains.add_argument(
+        "--db-output",
+        action="store_true",
+        default=False,
+        help="Save run parameters and domain assignments to SQLite 'domains' table.",
+    )
+    parser_domains.set_defaults(func=run_domains)
 
     return parser
 

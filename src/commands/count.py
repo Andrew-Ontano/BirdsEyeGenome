@@ -2,13 +2,11 @@
 
 import logging
 import multiprocessing
-import sys
 from pathlib import Path
-
 import src.beglib as bl
+import sys
 
 logger = logging.getLogger(__name__)
-
 
 def run_count(args) -> None:
     """Execute the count command.

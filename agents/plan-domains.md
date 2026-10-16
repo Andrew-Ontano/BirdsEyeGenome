@@ -1,3 +1,4 @@
+# Status: Completed
 # Objective:
 Develop a generalized Python pipeline to identify and classify genomic regional domains based on windowed k-mer composition. The pipeline must handle k-mers of any length, perform dimensionality reduction, support both full and canonical k-mer sets, and output labeled regional domains with their underlying k-mer frequencies.
 

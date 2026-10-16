@@ -1,19 +1,18 @@
 """Birds Eye Genome core library module."""
 
 from __future__ import annotations
-import itertools
-import sqlite3
-from collections.abc import Iterable, Iterator
-from pathlib import Path
-from typing import Any
 
-import matplotlib.colors as mcolors
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
+from collections.abc import Iterable, Iterator
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+import itertools
 import json
+import matplotlib.colors as mcolors
+import numpy as np
+import pandas as pd
+from pathlib import Path
+import sqlite3
+from typing import Any
 
 def read_genome(
     input_file: str,
@@ -114,9 +113,10 @@ def count_mers(task: dict[str, Any]) -> dict[str, Any]:
     counts = {kmer: 0 for kmer in kmers}
     seq_len = len(subseq)
 
-    if kmer_len > 0 and seq_len >= kmer_len:
+    #if kmer_len > 0 and seq_len >= kmer_len:
+    if seq_len >= kmer_len > 0:
         for i in range(seq_len - kmer_len + 1):
-            kmer = subseq[i : i + kmer_len]
+            kmer = subseq[i: i + kmer_len]
             if kmer in counts:
                 counts[kmer] += 1
 
@@ -355,7 +355,7 @@ def get_canonical_kmer(kmer: str) -> str:
     return min(kmer, rc)
 
 
-def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
+def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
     """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
 
     Args:
@@ -554,3 +554,335 @@ def process_window_proportions(
     processed_df = pd.concat([processed_df, normalized_features], axis=1)
 
     return processed_df, feature_cols, color_map
+
+
+def collapse_to_canonical(df: pd.DataFrame, kmer_cols: list[str]) -> pd.DataFrame:
+    """Collapse k-mer count columns into canonical k-mers (summing reverse complements).
+
+    Args:
+        df (pd.DataFrame): DataFrame containing k-mer counts.
+        kmer_cols (list[str]): List of k-mer column names to collapse.
+
+    Returns:
+        pd.DataFrame: DataFrame with redundant reverse complement k-mers merged into
+            lexicographically smaller canonical k-mer columns.
+    """
+    canonical_map: dict[str, list[str]] = {}
+    for kmer in kmer_cols:
+        canon = get_canonical_kmer(kmer)
+        canonical_map.setdefault(canon, []).append(kmer)
+
+    df_res = pd.DataFrame(index=df.index)
+    sorted_canons = sorted(canonical_map.keys(), key=kmer_sort_key)
+    for canon in sorted_canons:
+        cols_to_sum = canonical_map[canon]
+        df_res[canon] = df[cols_to_sum].sum(axis=1)
+
+    return df_res
+
+
+def prepare_kmer_frequencies(
+    df: pd.DataFrame,
+    kmer_cols: list[str],
+    use_canonical: bool = False,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Convert raw window k-mer counts to row-wise relative frequencies (proportions).
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing k-mer count columns.
+        kmer_cols (list[str]): Names of k-mer count columns in df.
+        use_canonical (bool): If True, collapse counts into canonical k-mers before normalizing.
+
+    Returns:
+        tuple[pd.DataFrame, list[str]]:
+            - DataFrame of normalized frequency values (0.0 to 1.0).
+            - List of resulting feature column names.
+    """
+    if use_canonical:
+        counts_df = collapse_to_canonical(df, kmer_cols)
+        feature_cols = list(counts_df.columns)
+    else:
+        feature_cols = sorted(kmer_cols, key=kmer_sort_key)
+        counts_df = df[feature_cols].copy()
+
+    row_sums = counts_df.sum(axis=1)
+    denom = row_sums.replace(0, 1.0)
+    freq_df = counts_df.div(denom, axis=0)
+
+    return freq_df, feature_cols
+
+
+def parse_n_states(n_states_arg: str | int) -> list[int]:
+    """Parse n_states argument into a list of integer state numbers.
+
+    Supports singular integer values (e.g., "4" or 4) or colon-separated ranges
+    (e.g., "3:10"), inclusive of limits.
+
+    Args:
+        n_states_arg (str | int): Singular integer or range string "A:B".
+
+    Returns:
+        list[int]: Sorted list of state numbers.
+    """
+    arg_str = str(n_states_arg).strip()
+    if ":" in arg_str:
+        parts = arg_str.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid range format for n-states: '{n_states_arg}'. Expected 'start:stop'.")
+        start, stop = int(parts[0]), int(parts[1])
+        if start > stop:
+            raise ValueError(f"Invalid range for n-states: '{n_states_arg}'. Start ({start}) > stop ({stop}).")
+        return list(range(start, stop + 1))
+    return [int(arg_str)]
+
+
+def identify_regional_domains(
+    df: pd.DataFrame,
+    kmer_cols: list[str],
+    use_canonical: bool = False,
+    n_states: int | str = 4,
+    variance_target: float = 0.90,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Segment genomic windows into hidden Markov model domain states based on k-mer composition.
+
+    Supports evaluating a single state count or iterating across a range of expected state values.
+
+    Args:
+        df (pd.DataFrame): Input genomic window DataFrame containing metadata and k-mer counts.
+        kmer_cols (list[str]): List of k-mer count column names.
+        use_canonical (bool): Collapse reverse complement k-mers if True. Defaults to False.
+        n_states (int | str): Number of HMM states or range string "A:B" (e.g. "3:10").
+            Defaults to 4.
+        variance_target (float): Variance ratio target for PCA dimensionality reduction.
+            Defaults to 0.90.
+        random_state (int): Seed for HMM initialization reproducible results.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]:
+            - Truncated window DataFrame with localization columns (`library_name`, `seq_name`,
+              `window_start`, `window_stop`, `window_size`), `comment`, and `Expected_{N}` columns.
+            - Combined domain profiles DataFrame containing mean k-mer frequencies for each domain.
+    """
+    from hmmlearn.hmm import GaussianHMM
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+
+    if df.empty:
+        raise ValueError("Input DataFrame is empty.")
+
+    state_list = parse_n_states(n_states)
+
+    meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size"]
+    loc_cols = [c for c in meta_cols if c in df.columns]
+
+    # Prepare truncated output DataFrame
+    df_results = df[loc_cols].copy() if loc_cols else pd.DataFrame(index=df.index)
+
+    # 1. Prepare k-mer relative frequencies
+    freq_df, feature_cols = prepare_kmer_frequencies(df, kmer_cols, use_canonical=use_canonical)
+
+    # Detect zero/empty windows (e.g. N-gaps)
+    zero_mask = freq_df.sum(axis=1) == 0.0
+
+    # Set comments for zero/N-gap windows
+    df_results["comment"] = ["N-gap present" if zero_mask.iloc[i] else "" for i in range(len(df))]
+
+    # 2. Handle missing/empty windows via forward/backward fill interpolation
+    model_freq_df = freq_df.copy()
+    if zero_mask.any():
+        model_freq_df.loc[zero_mask, :] = np.nan
+        model_freq_df = model_freq_df.ffill().bfill().fillna(0.0)
+
+    # 3. Dimensionality Reduction (StandardScaler + PCA)
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(model_freq_df)
+
+    max_components = min(scaled_data.shape[0], scaled_data.shape[1])
+    if max_components < 1:
+        raise ValueError("Not enough features or samples for PCA.")
+
+    pca_target: float | int = variance_target
+    if isinstance(variance_target, float) and (variance_target <= 0 or variance_target >= 1.0):
+        pca_target = min(5, max_components)
+    elif isinstance(variance_target, float) and max_components == 1:
+        pca_target = 1
+
+    pca = PCA(n_components=pca_target, random_state=random_state)
+    pca_components = pca.fit_transform(scaled_data)
+
+    lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
+
+    profile_frames = []
+
+    # Iterate over all requested state expectations
+    for num_s in state_list:
+        effective_states = min(num_s, pca_components.shape[0])
+        hmm_model = GaussianHMM(
+            n_components=effective_states,
+            covariance_type="full",
+            random_state=random_state,
+            n_iter=100,
+        )
+
+        if lengths:
+            hmm_model.fit(pca_components, lengths=lengths)
+            domain_assignments = hmm_model.predict(pca_components, lengths=lengths)
+        else:
+            hmm_model.fit(pca_components)
+            domain_assignments = hmm_model.predict(pca_components)
+
+        col_name = f"Expected_{num_s}"
+        df_results[col_name] = [f"Domain_{s}" for s in domain_assignments]
+
+        # Aggregate summary profile for this expected state count
+        temp_df = pd.DataFrame({"Domain_ID": df_results[col_name].values})
+        prof = aggregate_domain_frequencies(temp_df, feature_cols, freq_df)
+        prof.insert(0, "Expected_States", num_s)
+        profile_frames.append(prof)
+
+    combined_profiles = pd.concat(profile_frames, ignore_index=True)
+
+    return df_results, combined_profiles
+
+
+def aggregate_domain_frequencies(
+    df_results: pd.DataFrame,
+    feature_cols: list[str],
+    freq_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Calculate mean k-mer frequencies for each distinct domain identity state.
+
+    Args:
+        df_results (pd.DataFrame): DataFrame containing `Domain_ID` column.
+        feature_cols (list[str]): List of k-mer feature column names.
+        freq_df (pd.DataFrame): DataFrame of k-mer frequencies aligned with df_results.
+
+    Returns:
+        pd.DataFrame: Summary table with Domain_ID as index/column and mean frequency per k-mer.
+    """
+    freq_with_domain = freq_df.copy()
+    freq_with_domain["Domain_ID"] = df_results["Domain_ID"].values
+
+    profiles = freq_with_domain.groupby("Domain_ID", as_index=False)[feature_cols].mean()
+    return profiles
+
+
+def write_domains_db(
+    conn: sqlite3.Connection,
+    df_results: pd.DataFrame,
+    domain_profiles: pd.DataFrame,
+    params: dict[str, Any] | None = None,
+) -> None:
+    """Write domain assignments and domain summary profiles to SQLite tables.
+
+    Runs are indexed deterministically per unique quality set (expected_states,
+    variance_target, canonical) to prevent duplicate run entries when executing
+    overlapping ranges or iterative commands.
+
+    Args:
+        conn (sqlite3.Connection): Active SQLite connection.
+        df_results (pd.DataFrame): Window assignments containing seq_name, window_start,
+            window_stop, comment, and Expected_{N} columns.
+        domain_profiles (pd.DataFrame): Summary table of mean k-mer frequencies per domain.
+        params (dict[str, Any], optional): Dictionary of parameter metadata to log.
+    """
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS domain_runs (
+        run_id TEXT PRIMARY KEY,
+        expected_states INTEGER,
+        variance_target REAL,
+        canonical INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        params TEXT
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS domains (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT,
+        seq_name TEXT,
+        window_start INTEGER,
+        window_stop INTEGER,
+        domain_id TEXT,
+        comment TEXT,
+        FOREIGN KEY(run_id) REFERENCES domain_runs(run_id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS domain_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT,
+        domain_id TEXT,
+        profile_json TEXT,
+        FOREIGN KEY(run_id) REFERENCES domain_runs(run_id)
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_domains_run_seq ON domains(run_id, seq_name)")
+
+    base_params = params or {}
+    variance_target = float(base_params.get("variance_target", 0.90))
+    canonical = 1 if base_params.get("canonical", False) else 0
+
+    expected_cols = [c for c in df_results.columns if c.startswith("Expected_")]
+
+    for col in expected_cols:
+        num_s = int(col.replace("Expected_", ""))
+        run_id = f"run_n{num_s}_v{variance_target}_c{canonical}"
+
+        run_params = dict(base_params)
+        run_params["n_states"] = num_s
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO domain_runs (run_id, expected_states, variance_target, canonical, params) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, num_s, variance_target, canonical, json.dumps(run_params)),
+        )
+
+        cursor.execute("DELETE FROM domains WHERE run_id = ?", (run_id,))
+        cursor.execute("DELETE FROM domain_profiles WHERE run_id = ?", (run_id,))
+
+        # Window rows for this state expectation
+        domain_rows = []
+        for _, row in df_results.iterrows():
+            domain_rows.append((
+                run_id,
+                str(row.get("seq_name", "")),
+                int(row.get("window_start", 0)),
+                int(row.get("window_stop", 0)),
+                str(row.get(col, "")),
+                str(row.get("comment", "")),
+            ))
+
+        if domain_rows:
+            cursor.executemany(
+                "INSERT INTO domains (run_id, seq_name, window_start, window_stop, domain_id, comment) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                domain_rows,
+            )
+
+        # Profile rows for this state expectation
+        sub_profiles = domain_profiles[domain_profiles["Expected_States"] == num_s]
+        feature_cols = [c for c in sub_profiles.columns if c not in ("Expected_States", "Domain_ID")]
+        profile_rows = []
+        for _, row in sub_profiles.iterrows():
+            domain_id = str(row["Domain_ID"])
+            p_dict = {f_col: float(row[f_col]) for f_col in feature_cols}
+            profile_rows.append((
+                run_id,
+                domain_id,
+                json.dumps(p_dict),
+            ))
+
+        if profile_rows:
+            cursor.executemany(
+                "INSERT INTO domain_profiles (run_id, domain_id, profile_json) VALUES (?, ?, ?)",
+                profile_rows,
+            )
+
+    conn.commit()

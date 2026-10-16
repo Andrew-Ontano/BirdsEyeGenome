@@ -15,6 +15,8 @@ dependencies = [
     "matplotlib >=3.9.4",
     "dash >=4.4.1",
     "plotly >=5.23.0",
+    "scikit-learn >=1.4.0",
+    "hmmlearn >=0.3.0",
 ]
 
 [project.scripts]

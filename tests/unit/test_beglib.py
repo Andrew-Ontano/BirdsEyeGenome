@@ -136,17 +136,17 @@ def test_init_db_and_write_counts_db(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0] == ("test.fa", "seq1", 1, 10, 10)
 
-    cursor.execute("SELECT window_id, kmer, count FROM kmer_counts ORDER BY kmer")
-    kmer_rows = cursor.fetchall()
-    assert len(kmer_rows) == 2
-    assert kmer_rows == [(1, "AA", 2), (1, "AC", 1)]
-
     cursor.execute("SELECT key, value FROM metadata")
     metadata = dict(cursor.fetchall())
     assert metadata["kmer_size"] == "2"
     assert metadata["library_name"] == "test.fa"
 
     conn.close()
+
+    df = load_counts_data(db_file)
+    assert len(df) == 1
+    assert df["AA"].iloc[0] == 2
+    assert df["AC"].iloc[0] == 1
 
 
 def test_sparse_storage_and_kmer_6(tmp_path: Path) -> None:
@@ -204,7 +204,7 @@ def test_generate_kmer_colors() -> None:
     kmers = set_mers(2)
     colors = generate_kmer_colors(kmers)
     assert len(colors) == len(kmers)
-    for kmer, hex_code in colors.items():
+    for hex_code in colors.values():
         assert hex_code.startswith("#")
         assert len(hex_code) == 7
 
@@ -266,7 +266,7 @@ def test_process_window_proportions() -> None:
     df = pd.DataFrame(data)
 
     # Standard proportions without N-gaps or canonical collapse
-    df_proc, features, color_map = process_window_proportions(df, canonical=False, show_n_gaps=False)
+    df_proc, features, _color_map = process_window_proportions(df, canonical=False, show_n_gaps=False)
     assert set(features) == {"AAA", "TTT", "AAC", "GTT"}
     assert pytest.approx(df_proc["AAA"].iloc[0]) == 2 / 6
     assert pytest.approx(df_proc["TTT"].iloc[0]) == 2 / 6
