@@ -4,12 +4,10 @@
 import argparse
 import logging
 import sys
-
 from src.commands.count import run_count
 from src.commands.domains import run_domains
 from src.commands.plot import run_plot
 from src.commands.server import run_server
-
 
 def configure_logging(verbose: bool) -> None:
     """Configure standard logging level and format based on verbosity flag.

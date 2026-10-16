@@ -1,14 +1,13 @@
 """Command handler for regional domain segmentation and identification."""
 
+from __future__ import annotations
 import logging
+from pathlib import Path
+import src.beglib as bl
 import sqlite3
 import sys
-from pathlib import Path
-
-import src.beglib as bl
 
 logger = logging.getLogger(__name__)
-
 
 def run_domains(args) -> None:
     """Execute the domains command to segment genomic windows into regional domains.

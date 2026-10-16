@@ -1,22 +1,20 @@
 """Command handler and Dash web application for interactive sequence browser."""
 
+from __future__ import annotations
 import base64
+import dash
+from dash import Input, Output, State, dcc, html
+from io import StringIO
 import logging
 import math
-import tempfile
-from io import StringIO
-from pathlib import Path
-
-import dash
 import numpy as np
 import pandas as pd
+from pathlib import Path
 import plotly.graph_objects as go
-from dash import Input, Output, State, dcc, html
-
 import src.beglib as bl
+import tempfile
 
 logger = logging.getLogger(__name__)
-
 
 def decimate_dataframe(df: pd.DataFrame, max_points: int = 1000) -> pd.DataFrame:
     """Downsample window DataFrame if number of rows exceeds max_points.

@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
 import itertools
 import json
-import sqlite3
-from collections.abc import Iterable, Iterator
-from pathlib import Path
-from typing import Any
-
 import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
-from Bio import SeqIO
-from Bio.SeqRecord import SeqRecord
-
+from pathlib import Path
+import sqlite3
+from typing import Any
 
 def read_genome(
     input_file: str,
@@ -115,9 +113,10 @@ def count_mers(task: dict[str, Any]) -> dict[str, Any]:
     counts = {kmer: 0 for kmer in kmers}
     seq_len = len(subseq)
 
-    if kmer_len > 0 and seq_len >= kmer_len:
+    #if kmer_len > 0 and seq_len >= kmer_len:
+    if seq_len >= kmer_len > 0:
         for i in range(seq_len - kmer_len + 1):
-            kmer = subseq[i : i + kmer_len]
+            kmer = subseq[i: i + kmer_len]
             if kmer in counts:
                 counts[kmer] += 1
 
@@ -356,7 +355,7 @@ def get_canonical_kmer(kmer: str) -> str:
     return min(kmer, rc)
 
 
-def load_counts_data(file_path: str, file_format: str = "auto") -> pd.DataFrame:
+def load_counts_data(file_path: str | Path, file_format: str = "auto") -> pd.DataFrame:
     """Load k-mer count data from a .beg TSV file or .db SQLite database into a DataFrame.
 
     Args:
