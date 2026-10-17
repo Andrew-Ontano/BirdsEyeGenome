@@ -39,10 +39,10 @@ def run_count(args) -> None:
         if threads > 1 and len(tasks) > 0:
             logger.info("Processing window tasks using %d worker threads/processes", threads)
             with multiprocessing.Pool(processes=threads) as pool:
-                results = pool.map(bl.count_mers, tasks)
+                results = pool.map(bl.window_task, tasks)
         else:
             logger.info("Processing window tasks sequentially")
-            results = [bl.count_mers(task) for task in tasks]
+            results = [bl.window_task(task) for task in tasks]
 
         output_format = getattr(args, "output_format", "beg")
         output_file = args.output

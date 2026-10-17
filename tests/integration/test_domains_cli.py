@@ -79,6 +79,30 @@ def test_beg_domains_cli_beg_input(sample_beg_file: Path, tmp_path: Path) -> Non
     assert len(df_sum) == 2
 
 
+def test_beg_domains_cli_smoothing_sigma(sample_beg_file: Path, tmp_path: Path) -> None:
+    """Test `beg domains` CLI with --smoothing-sigma option."""
+    out_beg = tmp_path / "out_smoothed_domains.beg"
+    cmd = [
+        sys.executable,
+        "beg.py",
+        "domains",
+        "-i",
+        str(sample_beg_file),
+        "-o",
+        str(out_beg),
+        "-n",
+        "2",
+        "--smoothing-sigma",
+        "1.5",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"CLI error: {res.stderr}"
+    assert out_beg.exists()
+    df_out = pd.read_csv(out_beg, sep="\t")
+    assert "Expected_2" in df_out.columns
+    assert "complexity" in df_out.columns
+
+
 def test_beg_domains_cli_db_input(sample_db_file: Path, tmp_path: Path) -> None:
     """Test `beg domains` CLI with a .db input file."""
     out_db = tmp_path / "out_domains.db"

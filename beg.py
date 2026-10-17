@@ -318,6 +318,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Variance ratio target for PCA dimensionality reduction (default: 0.90).",
     )
     parser_domains.add_argument(
+        "--smoothing-sigma",
+        type=float,
+        required=False,
+        default=1.0,
+        help="Standard deviation for pre-PCA Gaussian smoothing filter across consecutive windows (default: 1.0).",
+    )
+    parser_domains.add_argument(
         "--canonical",
         action="store_true",
         default=False,
