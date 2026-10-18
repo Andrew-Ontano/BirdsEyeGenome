@@ -1,4 +1,4 @@
-"""Utility script to visualize domain predictions aligned with k-mer sequence signatures."""
+"""Utility script to visualize domain predictions aligned with k-mer sequence signatures, Shannon entropy, and zlib complexity."""
 
 from __future__ import annotations
 
@@ -138,20 +138,19 @@ def visualize_domains(
         if seq_counts.empty or seq_domains.empty:
             continue
 
-        n_rows = 1 + len(expected_cols)
+        n_rows = 3 + len(expected_cols)
         fig, axes = plt.subplots(
             nrows=n_rows,
             ncols=1,
-            figsize=(12, 3 + 0.8 * len(expected_cols)),
-            gridspec_kw={"height_ratios": [3] + [0.8] * len(expected_cols)},
+            figsize=(12, 5 + 0.8 * len(expected_cols)),
+            gridspec_kw={"height_ratios": [3, 1, 1] + [0.8] * len(expected_cols)},
             sharex=True,
         )
 
-        if n_rows == 1:
-            axes = [axes]
-
         ax_count = axes[0]
-        domain_axes = axes[1:]
+        ax_entropy = axes[1]
+        ax_complexity = axes[2]
+        domain_axes = axes[3:]
 
         # 1. BEG stacked k-mer proportion plot
         x_vals = seq_counts["window_start"].values
@@ -181,7 +180,31 @@ def visualize_domains(
             frameon=False,
         )
 
-        # 2. Domain state rows
+        # 2. Shannon Entropy line graph
+        if "entropy" in seq_domains.columns:
+            entropy_vals = seq_domains["entropy"].values
+        else:
+            entropy_vals = bl.calculate_shannon_entropy(seq_counts[feature_cols]).values
+
+        ax_entropy.plot(x_vals, entropy_vals, color="#1f77b4", linewidth=1.5)
+        ax_entropy.set_ylabel("Entropy\n(nats)", fontsize=9, rotation=0, ha="right", va="center")
+        ax_entropy.set_ylim(bottom=0)
+        ax_entropy.grid(True, linestyle="--", alpha=0.5)
+
+        # 3. zlib Complexity line graph
+        if "complexity" in seq_counts.columns:
+            complexity_vals = seq_counts["complexity"].values
+        elif "complexity" in seq_domains.columns:
+            complexity_vals = seq_domains["complexity"].values
+        else:
+            complexity_vals = np.zeros(len(x_vals))
+
+        ax_complexity.plot(x_vals, complexity_vals, color="#d62728", linewidth=1.5)
+        ax_complexity.set_ylabel("Complexity\n(zlib)", fontsize=9, rotation=0, ha="right", va="center")
+        ax_complexity.set_ylim(bottom=0)
+        ax_complexity.grid(True, linestyle="--", alpha=0.5)
+
+        # 4. Domain state rows
         for idx, (exp_col, ax_dom) in enumerate(zip(expected_cols, domain_axes)):
             n_states = exp_col.replace("Expected_", "")
             ax_dom.set_ylabel(f"States: {n_states}", fontsize=9, rotation=0, ha="right", va="center")
@@ -236,7 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: Argument parser.
     """
     parser = argparse.ArgumentParser(
-        description="Visualize regional domain predictions aligned with k-mer sequence signatures."
+        description="Visualize regional domain predictions aligned with k-mer sequence signatures, entropy, and complexity."
     )
     parser.add_argument(
         "-d",
