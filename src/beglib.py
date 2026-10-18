@@ -705,7 +705,7 @@ def _fit_hmm_state(
         pca_components: np.ndarray,
         lengths: list[int] | None,
         random_state: int,
-        feature_cols: list[str],
+        profile_cols: list[str],
         freq_df: pd.DataFrame
 ) -> tuple[int, list[str], pd.DataFrame]:
     """Worker function to fit HMM for a specific state count."""
@@ -728,7 +728,7 @@ def _fit_hmm_state(
     assignments = [f"Domain_{s}" for s in domain_assignments]
 
     temp_df = pd.DataFrame({"Domain_ID": assignments})
-    prof = aggregate_domain_frequencies(temp_df, feature_cols, freq_df)
+    prof = aggregate_domain_frequencies(temp_df, profile_cols, freq_df)
     prof.insert(0, "Expected_States", num_s)
 
     return num_s, assignments, prof
@@ -772,7 +772,7 @@ def identify_regional_domains(
 
     state_list = parse_n_states(n_states)
 
-    meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size", "complexity"]
+    meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size"]
     loc_cols = [c for c in meta_cols if c in df.columns]
 
     # Prepare truncated output DataFrame
@@ -783,9 +783,6 @@ def identify_regional_domains(
 
     # Detect zero/empty windows (e.g. N-gaps)
     zero_mask = freq_df.sum(axis=1) == 0.0
-
-    # Set comments for zero/N-gap windows
-    df_results["comment"] = ["N-gap present" if zero_mask.iloc[i] else "" for i in range(len(df))]
 
     # 2. Handle missing/empty windows via forward/backward fill interpolation
     model_freq_df = freq_df.copy()
@@ -806,6 +803,13 @@ def identify_regional_domains(
         model_freq_df["complexity"] = complexity_series.values
     else:
         model_freq_df["complexity"] = 0.0
+
+    # Include complexity and entropy in df_results output window table
+    df_results["complexity"] = model_freq_df["complexity"].values
+    df_results["entropy"] = model_freq_df["entropy"].values
+
+    # Set comments for zero/N-gap windows
+    df_results["comment"] = ["N-gap present" if zero_mask.iloc[i] else "" for i in range(len(df))]
 
     # 3. Pre-PCA Gaussian smoothing per sequence contig
     if smoothing_sigma > 0.0:
@@ -837,11 +841,13 @@ def identify_regional_domains(
 
     lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
 
+    profile_cols = feature_cols + ["entropy", "complexity"]
+
     profile_frames = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         futures = {
             executor.submit(
-                _fit_hmm_state, num_s, pca_components, lengths, random_state, feature_cols, freq_df
+                _fit_hmm_state, num_s, pca_components, lengths, random_state, profile_cols, model_freq_df
             ): num_s
             for num_s in state_list
         }

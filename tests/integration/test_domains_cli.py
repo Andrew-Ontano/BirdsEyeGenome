@@ -71,11 +71,15 @@ def test_beg_domains_cli_beg_input(sample_beg_file: Path, tmp_path: Path) -> Non
     df_out = pd.read_csv(out_beg, sep="\t")
     assert "Expected_2" in df_out.columns
     assert "comment" in df_out.columns
+    assert "entropy" in df_out.columns
+    assert "complexity" in df_out.columns
     assert len(df_out) == 4
 
     df_sum = pd.read_csv(out_summary, sep="\t")
     assert "Expected_States" in df_sum.columns
     assert "Domain_ID" in df_sum.columns
+    assert "entropy" in df_sum.columns
+    assert "complexity" in df_sum.columns
     assert len(df_sum) == 2
 
 

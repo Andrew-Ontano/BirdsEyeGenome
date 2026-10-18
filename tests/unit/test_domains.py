@@ -108,6 +108,8 @@ def test_identify_regional_domains(mock_kmer_df: pd.DataFrame) -> None:
 
     assert "Expected_2" in df_results.columns
     assert "comment" in df_results.columns
+    assert "entropy" in df_results.columns
+    assert "complexity" in df_results.columns
     assert "AAA" not in df_results.columns  # Truncated output check
 
     # Verify N-gap comment for 5th window (index 4)
@@ -117,6 +119,8 @@ def test_identify_regional_domains(mock_kmer_df: pd.DataFrame) -> None:
     # Verify domain profiles summary table structure
     assert "Expected_States" in domain_profiles.columns
     assert "Domain_ID" in domain_profiles.columns
+    assert "entropy" in domain_profiles.columns
+    assert "complexity" in domain_profiles.columns
     assert len(domain_profiles) == 2
     assert set(kmer_cols).issubset(set(domain_profiles.columns))
 
