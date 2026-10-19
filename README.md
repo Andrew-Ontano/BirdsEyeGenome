@@ -14,7 +14,7 @@ ___
 ## Horizon Plots
 DNA is not a monolith. Within genic regions, the ratio of GC-richness can fluctuate dramatically. Likewise, the richness of a more complex alphabet of k-mers can fluctuate but be masked by a more consistent GC-richness. These plots serve to gradually increase the alphabet of the genome while maintaining readability through an AT (orange-red) to GC (blue-green) color scheme. The goal of this tool is to assist with showcasing how complex genomes are and to contrast large stretches of tandemly repetitive DNA from one another. Large tandem repeats correspond to regions where colors flatten out. Simpler repeats (e.g.: stretches of ATAT) have fewer, wider bands whereas more complex repeats (e.g.: centromeric satellites, rDNA arrays) have more bands that are typically thinner.
 
-### Human chromosome 1 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_009914755.1/)), 50 kilo-basepair windows, k=3 ([Canonical plot](![Homo_sapiens_50kbp_canonical_NC_060925.1.png](includes/images/Homo_sapiens_50kbp_canonical_NC_060925.1.png))) [Color key](includes/images/k3_key.png)
+### Human chromosome 1 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_009914755.1/)), 50 kilo-basepair windows, k=3 ([Canonical plot](includes/images/Homo_sapiens_50kbp_canonical_NC_060925.1.png)) [Color key](includes/images/k3_key.png)
 ![Homo_sapien_50kbp_NC_060925.1.png](includes/images/Homo_sapien_50kbp_NC_060925.1.png)
 
 ---
@@ -93,7 +93,7 @@ python src/utils/domain_visualize.py \
   --dpi 300
   --n-gaps
 ```
-### Northern Giant Hornet chromosome 17 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_059792135.1/)), 10 kilo-basepair windows, k=3 ([Canonical plot](![Homo_sapiens_50kbp_canonical_NC_060925.1.png](includes/images/Homo_sapiens_50kbp_canonical_NC_060925.1.png)))
+### Northern Giant Hornet chromosome 17 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_059792135.1/)), 10 kilo-basepair windows, k=3
 ![Vespa_mandarinia_10kbp_Chr17_domains.png](includes/images/Vespa_mandarinia_10kbp_Chr17_domains.png)
 
 ### [hierarchical_composition.py](src/utils/hierarchical_composition.py)
