@@ -29,7 +29,7 @@ def run_domains(args) -> None:
             logger.error("Input dataset is empty: %s", args.input)
             sys.exit(1)
 
-        meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size"]
+        meta_cols = ["library_name", "seq_name", "window_start", "window_stop", "window_size", "complexity"]
         kmer_cols = [c for c in df.columns if c not in meta_cols]
 
         if not kmer_cols:
@@ -39,12 +39,14 @@ def run_domains(args) -> None:
         use_canonical = getattr(args, "canonical", False)
         n_states = getattr(args, "n_states", "4")
         variance_target = getattr(args, "variance_target", 0.90)
+        smoothing_sigma = getattr(args, "smoothing_sigma", 1.0)
         threads = getattr(args, "threads", 1)
 
         logger.info(
-            "Running domain identification: n_states=%s, variance_target=%.2f, canonical=%s",
+            "Running domain identification: n_states=%s, variance_target=%.2f, smoothing_sigma=%.2f, canonical=%s",
             str(n_states),
             variance_target,
+            smoothing_sigma,
             use_canonical,
         )
 
@@ -54,6 +56,7 @@ def run_domains(args) -> None:
             use_canonical=use_canonical,
             n_states=n_states,
             variance_target=variance_target,
+            smoothing_sigma=smoothing_sigma,
             threads=threads,
         )
 
@@ -80,6 +83,7 @@ def run_domains(args) -> None:
             params = {
                 "n_states": str(n_states),
                 "variance_target": variance_target,
+                "smoothing_sigma": smoothing_sigma,
                 "canonical": use_canonical,
                 "input_file": str(input_path.resolve()),
             }

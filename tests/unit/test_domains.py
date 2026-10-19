@@ -5,7 +5,9 @@ import sqlite3
 import pandas as pd
 import pytest
 
+import numpy as np
 from src.beglib import (
+    calculate_shannon_entropy,
     collapse_to_canonical,
     identify_regional_domains,
     prepare_kmer_frequencies,
@@ -48,6 +50,40 @@ def test_collapse_to_canonical(mock_kmer_df: pd.DataFrame) -> None:
     assert canon_df["CCC"].iloc[5] == 8
 
 
+def test_calculate_shannon_entropy() -> None:
+    """Test calculate_shannon_entropy produces expected natural entropy values."""
+    df_equal = pd.DataFrame({"k1": [0.25], "k2": [0.25], "k3": [0.25], "k4": [0.25]})
+    entropy_equal = calculate_shannon_entropy(df_equal)
+    assert pytest.approx(entropy_equal.iloc[0], abs=1e-4) == np.log(4)
+
+    df_pure = pd.DataFrame({"k1": [1.0], "k2": [0.0], "k3": [0.0]})
+    entropy_pure = calculate_shannon_entropy(df_pure)
+    assert pytest.approx(entropy_pure.iloc[0]) == 0.0
+
+    df_zero = pd.DataFrame({"k1": [0.0], "k2": [0.0]})
+    entropy_zero = calculate_shannon_entropy(df_zero)
+    assert pytest.approx(entropy_zero.iloc[0]) == 0.0
+
+
+def test_identify_regional_domains_with_smoothing_and_complexity(mock_kmer_df: pd.DataFrame) -> None:
+    """Test identify_regional_domains with custom smoothing sigma and complexity column."""
+    mock_df_with_comp = mock_kmer_df.copy()
+    mock_df_with_comp["complexity"] = [0.5, 0.52, 0.51, 0.49, 0.0, 0.8, 0.82, 0.81, 0.79, 0.8]
+
+    kmer_cols = ["AAA", "TTT", "CCC", "GGG", "AAC", "GTT"]
+    df_results, domain_profiles = identify_regional_domains(
+        df=mock_df_with_comp,
+        kmer_cols=kmer_cols,
+        n_states="2",
+        smoothing_sigma=1.5,
+    )
+
+    assert "Expected_2" in df_results.columns
+    assert "complexity" in df_results.columns
+    assert len(df_results) == 10
+    assert len(domain_profiles) == 2
+
+
 def test_prepare_kmer_frequencies(mock_kmer_df: pd.DataFrame) -> None:
     """Test prepare_kmer_frequencies normalizes counts to proportions."""
     kmer_cols = ["AAA", "TTT", "CCC", "GGG", "AAC", "GTT"]
@@ -72,6 +108,8 @@ def test_identify_regional_domains(mock_kmer_df: pd.DataFrame) -> None:
 
     assert "Expected_2" in df_results.columns
     assert "comment" in df_results.columns
+    assert "entropy" in df_results.columns
+    assert "complexity" in df_results.columns
     assert "AAA" not in df_results.columns  # Truncated output check
 
     # Verify N-gap comment for 5th window (index 4)
@@ -81,6 +119,8 @@ def test_identify_regional_domains(mock_kmer_df: pd.DataFrame) -> None:
     # Verify domain profiles summary table structure
     assert "Expected_States" in domain_profiles.columns
     assert "Domain_ID" in domain_profiles.columns
+    assert "entropy" in domain_profiles.columns
+    assert "complexity" in domain_profiles.columns
     assert len(domain_profiles) == 2
     assert set(kmer_cols).issubset(set(domain_profiles.columns))
 
