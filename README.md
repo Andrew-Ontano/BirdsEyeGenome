@@ -1,6 +1,10 @@
 # Birds Eye Genome (BEG)
 ### *"Genomic sequence signature at a distance."*
-
+___
+## Author
+* **Andrew Ontano**, Center for Applied Genetic Techniques, University of Georgia 
+---
+## About BEG
 **Birds Eye Genome** (**BEG**) is the successor to the [Spectra](https://github.com/Andrew-Ontano/Spectra) toolkit for visualizing genome-scale sequences and inferring regional shifts in coherent genome patterns. 
 * User supplies a FASTA file of one or more genomic sequences
 * **BEG** outputs "Horizon Plots" as both static figures for publication and interactive Web application modules for exploring genome-wide k-mer signatures and segmenting regional domain identities.
@@ -59,11 +63,9 @@ A complete end-to-end multi-window analytical pipeline for a genome FASTA file (
 # 1. Count k-mers across small (10kb) and large (50kb) window sizes with no overlap
 # For best visualization, I recommend window sizes around 1/1,000 the typical chromosome size
 beg count -i genome.fasta -w 10000 -s 10000 -o genome_10k.beg
-beg count -i genome.fasta -w 50000 -s 50000 -o genome_50k.beg
 
 # 2. Perform regional domain segmentation across state ranges (e.g. 2 to 8 states)
 beg domains -i genome_10k.beg -n "2:8" -o genome_10k_domains.beg
-beg domains -i genome_50k.beg -n "2:8" -o genome_50k_domains.beg
 
 # 3a. Generate static signature plots
 beg plot -i genome_10k.beg -o genome_10k_signature --format png --key alone
