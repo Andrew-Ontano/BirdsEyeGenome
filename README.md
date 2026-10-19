@@ -78,7 +78,7 @@ beg server -i genome_10k.beg
 
 ## Experimental features
 
-### `domain_visualize.py`
+### [domain_visualize.py](src/utils/domain_visualize.py)
 
 Generate aligned sequence signature and HMM domain state figures: by scanning across a range of expected cluster counts, this tool can assist in illustrating where contigs break due to a tandemly repetitive element or to see sequence similarity across the gaps that Hi-C data bridges.
 
@@ -96,7 +96,7 @@ python src/utils/domain_visualize.py \
 ### Northern Giant Hornet chromosome 17 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_059792135.1/)), 10 kilo-basepair windows, k=3 ([Canonical plot](![Homo_sapiens_50kbp_canonical_NC_060925.1.png](includes/images/Homo_sapiens_50kbp_canonical_NC_060925.1.png)))
 ![Vespa_mandarinia_10kbp_Chr17_domains.png](includes/images/Vespa_mandarinia_10kbp_Chr17_domains.png)
 
-### `hierarchical_composition.py`
+### [hierarchical_composition.py](src/utils/hierarchical_composition.py)
 
 Consolidate multi-window domain outputs into hierarchical labels and sequential levels: This tool is intended for consolidating multiple runs with various window sizes and k-mer sizes and outputting a TSV with labels for each coordinate for the smallest window size set. The domain labels are arranged by: 1) fewest to most expected clusters; and 2) largest to smallest window size. All other ordering should be expected as the first to last in the list. As this is improved, the goal is to use this consolidated data to produce alluvial plots and user labeling.
 
@@ -105,6 +105,18 @@ python src/utils/hierarchical_composition.py \
   -i genome_50k_domains.beg genome_10k_domains.beg \
   -o hierarchical_output.tsv
 ```
+
+### [alluvial_plot.py](src/utils/alluvial_plot.py)
+
+Take the given hierarchical composition, then output an image or html file for viewing how domain assignment shifts.
+```bash
+python src/utils/alluvial_plot.py \
+  -i hierarchical_output.tsv
+  -o hierarchical_output.html
+```
+
+### Vespa mandarinia domain state changes (screenshot)
+![Vespa_mandarinia_allu_example.png](includes/images/Vespa_mandarinia_allu_example.png)
 
 ---
 

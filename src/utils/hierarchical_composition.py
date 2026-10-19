@@ -12,11 +12,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-try:
-    import src.beglib as bl
-except ImportError:
-    import beglib as bl
-
 logger = logging.getLogger(__name__)
 
 
