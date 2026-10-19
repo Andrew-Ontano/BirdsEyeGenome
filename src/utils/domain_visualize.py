@@ -13,8 +13,9 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-import src.beglib as bl
+import os.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
+import beglib as bl
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ def visualize_domains(
     canonical: bool = False,
     dpi: int = 300,
     img_format: str = "png",
+    show_n_gaps: bool = False,
 ) -> None:
     """Generate domain visualization figures for genomic sequences.
 
@@ -109,7 +111,7 @@ def visualize_domains(
     proc_df, feature_cols, color_map = bl.process_window_proportions(
         counts_df,
         canonical=canonical,
-        show_n_gaps=False,
+        show_n_gaps=show_n_gaps,
     )
 
     expected_cols = sorted(
@@ -172,13 +174,6 @@ def visualize_domains(
         ax_count.set_title(f"Genomic Signature & Domain Segmentation: {seq}", fontsize=13, fontweight="bold")
         ax_count.set_ylabel("Proportion", fontsize=10)
         ax_count.set_ylim(0, 1.0)
-        ax_count.legend(
-            bbox_to_anchor=(1.02, 1),
-            loc="upper left",
-            borderaxespad=0,
-            fontsize="small",
-            frameon=False,
-        )
 
         # 2. Shannon Entropy line graph
         if "entropy" in seq_domains.columns:
@@ -232,18 +227,6 @@ def visualize_domains(
         axes[-1].set_xlabel("Genomic Position (bp)", fontsize=11)
         axes[-1].set_xlim(x_vals[0], window_stops[-1] if len(window_stops) > 0 else x_vals[0] + 1)
 
-        # Legend for domain colors on top domain axis
-        if sorted_domains and len(domain_axes) > 0:
-            domain_patches = [mpatches.Patch(color=domain_color_map[dom], label=dom) for dom in sorted_domains]
-            domain_axes[0].legend(
-                handles=domain_patches,
-                bbox_to_anchor=(1.02, 1),
-                loc="upper left",
-                title="Domains",
-                frameon=False,
-                fontsize="small",
-            )
-
         clean_seq = sanitize_filename(str(seq))
         out_file = out_dir / f"{clean_seq}_domains.{img_format}"
         plt.tight_layout()
@@ -289,6 +272,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collapse reverse complement k-mers into canonical set.",
     )
     parser.add_argument(
+        "--n-gaps",
+        action="store_true",
+        default=False,
+        help="Plot N-gaps in horizon plot.",
+    )
+    parser.add_argument(
         "--dpi",
         type=int,
         default=300,
@@ -318,6 +307,7 @@ def main() -> None:
             canonical=args.canonical,
             dpi=args.dpi,
             img_format=args.format,
+            show_n_gaps=args.n_gaps,
         )
     except Exception as err:
         logger.error("Failed to visualize domains: %s", err)
