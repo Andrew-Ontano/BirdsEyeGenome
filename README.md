@@ -1,7 +1,21 @@
 # Birds Eye Genome (BEG)
-*"Genomic sequence signature at a distance."*
+### *"Genomic sequence signature at a distance."*
+___
+## Author
+* **Andrew Ontano**, Center for Applied Genetic Techniques, University of Georgia 
+---
+## About BEG
+**Birds Eye Genome** (**BEG**) is the successor to the [Spectra](https://github.com/Andrew-Ontano/Spectra) toolkit for visualizing genome-scale sequences and inferring regional shifts in coherent genome patterns. 
+* User supplies a FASTA file of one or more genomic sequences
+* **BEG** outputs "Horizon Plots" as both static figures for publication and interactive Web application modules for exploring genome-wide k-mer signatures and segmenting regional domain identities.
+* Designed for super-short k-mers (typically k=2 to k=6) but the file format and visualization as described below can support a shortlist of user-supplied, longer k-mers that can be counted via a prior word search. 
+* This toolkit does not replace assembly quality assessments such as repeat analyses, read depth coverage, nor read remapping, but serves to facilitate the sequencing-to-scaffolding process with visual indicators. 
 
-**Birds Eye Genome** (**BEG**) is the successor to the [Spectra](https://github.com/Andrew-Ontano/Spectra) toolkit for visualizing genome-scale sequences and inferring regional shifts in coherent genome patterns. By supplying a FASTA file of one or more genomic sequences, **BEG** outputs both static figures for publication and interactive Web application modules for exploring genome-wide k-mer signatures and segmenting regional domain identities.
+## Horizon Plots
+DNA is not a monolith. Within genic regions, the ratio of GC-richness can fluctuate dramatically. Likewise, the richness of a more complex alphabet of k-mers can fluctuate but be masked by a more consistent GC-richness. These plots serve to gradually increase the alphabet of the genome while maintaining readability through an AT (orange-red) to GC (blue-green) color scheme. The goal of this tool is to assist with showcasing how complex genomes are and to contrast large stretches of tandemly repetitive DNA from one another. Large tandem repeats correspond to regions where colors flatten out. Simpler repeats (e.g.: stretches of ATAT) have fewer, wider bands whereas more complex repeats (e.g.: centromeric satellites, rDNA arrays) have more bands that are typically thinner.
+
+### Human chromosome 1 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_009914755.1/)), 50 kilo-basepair windows, k=3 ([Canonical plot](![Homo_sapiens_50kbp_canonical_NC_060925.1.png](includes/images/Homo_sapiens_50kbp_canonical_NC_060925.1.png))) [Color key](includes/images/k3_key.png)
+![Homo_sapien_50kbp_NC_060925.1.png](includes/images/Homo_sapien_50kbp_NC_060925.1.png)
 
 ---
 
@@ -9,18 +23,18 @@
 
 ### Prerequisites & Conda Environment Setup
 
-BEG requires Python 3.12 or higher. We recommend using Conda or Mamba to create an isolated environment with all necessary scientific dependencies:
+BEG requires Python 3.12 or higher.Conda or Mamba are recommended to create an isolated environment with all necessary scientific dependencies:
 
 ```bash
 # Create a new Conda environment with Python 3.12
-conda create -n beg_env python=3.12 -y
+conda create -n BEG python=3.12 -y
 
 # Activate the environment
-conda activate beg_env
+conda activate BEG
 
 # Clone repository and install BEG in editable mode
-git clone https://github.com/Andrew-Ontano/Birds-Eye-Genome.git
-cd Birds-Eye-Genome
+git clone https://github.com/Andrew-Ontano/BirdsEyeGenome.git
+cd BirdsEyeGenome
 pip install -e .
 ```
 
@@ -35,10 +49,9 @@ BEG provides a modular CLI interface via `beg.py` and dedicated utilities in `sr
 1. **`beg count`**: Sliding window k-mer frequency counting across FASTA sequence contigs. Computes k-mer counts alongside zlib compression complexity per window and outputs tab-separated `.beg` text files or binary SQLite `.db` databases.
 2. **`beg domains`**: Dimensionality reduction (PCA) and sequence segmentation using Hidden Markov Models (GaussianHMM). Uncovers hidden domain states across expected cluster counts ($N$-states) and computes Shannon entropy and zlib complexity per window.
 3. **`beg plot`**: Generates high-resolution stacked sequence signature figures (PNG, PDF, SVG) displaying k-mer composition patterns.
-4. **`beg server`**: Launches an interactive Dash web application (`http://127.0.0.1:8050`) for interactive genome signature inspection.
+4. **`beg server`**: Launches an interactive Dash web application (`http://127.0.0.1:8050`) for closer looks at genome signature inspection.
 5. **`src/utils/domain_visualize.py`**: Visualizes aligned stacked k-mer signatures, Shannon entropy line graphs, zlib complexity line graphs, and horizontal domain state prediction blocks.
 6. **`src/utils/hierarchical_composition.py`**: Integrates multi-window domain datasets across different window sizes and state counts into a consolidated hierarchical genome composition table.
-7. **`src/utils/alluvial_plot.py`**: Renders static (PNG, PDF, SVG) or interactive (HTML) alluvial flow plots displaying hierarchical domain compositions across sequential levels starting from top to bottom by genomic position.
 
 ---
 
@@ -47,69 +60,50 @@ BEG provides a modular CLI interface via `beg.py` and dedicated utilities in `sr
 A complete end-to-end multi-window analytical pipeline for a genome FASTA file (`genome.fasta`):
 
 ```bash
-# 1. Count k-mers across small (10kb) and large (50kb) window sizes
+# 1. Count k-mers across small (10kb) and large (50kb) window sizes with no overlap
+# For best visualization, I recommend window sizes around 1/1,000 the typical chromosome size
 beg count -i genome.fasta -w 10000 -s 10000 -o genome_10k.beg
-beg count -i genome.fasta -w 50000 -s 50000 -o genome_50k.beg
 
-# 2. Perform regional domain segmentation across state ranges (e.g. 2 to 4 states)
-beg domains -i genome_10k.beg -n "2:4" -o genome_10k_domains.beg
-beg domains -i genome_50k.beg -n "2:4" -o genome_50k_domains.beg
+# 2. Perform regional domain segmentation across state ranges (e.g. 2 to 8 states)
+beg domains -i genome_10k.beg -n "2:8" -o genome_10k_domains.beg
 
-# 3. Generate static signature plots
-beg plot -i genome_10k.beg -o genome_10k_signature --format png
+# 3a. Generate static signature plots
+beg plot -i genome_10k.beg -o genome_10k_signature --format png --key alone
 
-# 4. Construct multi-window hierarchical composition
-python src/utils/hierarchical_composition.py \
-  -i genome_10k_domains.beg genome_50k_domains.beg \
-  -o genome_hierarchical_composition.tsv
-
-# 5. Render alluvial flow plot from hierarchical composition
-python src/utils/alluvial_plot.py \
-  -i genome_hierarchical_composition.tsv \
-  -o genome_alluvial.png
-
-# 6. Render aligned domain visualization figure
-python src/utils/domain_visualize.py \
-  -d genome_10k_domains.beg \
-  -c genome_10k.beg \
-  -o figures/
+# 3b. Server with plotly plots. Starts a local server instance that can be accessed from a browser
+beg server -i genome_10k.beg
 ```
 
 ---
 
-## Example Calls to Utilities
+## Experimental features
 
 ### `domain_visualize.py`
 
-Generate aligned sequence signature and HMM domain state figures:
+Generate aligned sequence signature and HMM domain state figures: by scanning across a range of expected cluster counts, this tool can assist in illustrating where contigs break due to a tandemly repetitive element or to see sequence similarity across the gaps that Hi-C data bridges.
+
 
 ```bash
+# Plot horizon and expected states from domain file (2:10)
 python src/utils/domain_visualize.py \
   -d genome_10k_domains.beg \
   -c genome_10k.beg \
   -o output_figures/ \
   --format png \
   --dpi 300
+  --n-gaps
 ```
+### Northern Giant Hornet chromosome 17 ([Paper](https://doi.org/10.1126/science.abj6987), [Genbank](https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_059792135.1/)), 10 kilo-basepair windows, k=3 ([Canonical plot](![Homo_sapiens_50kbp_canonical_NC_060925.1.png](includes/images/Homo_sapiens_50kbp_canonical_NC_060925.1.png)))
+![Vespa_mandarinia_10kbp_Chr17_domains.png](includes/images/Vespa_mandarinia_10kbp_Chr17_domains.png)
 
 ### `hierarchical_composition.py`
 
-Consolidate multi-window domain outputs into hierarchical labels and sequential levels:
+Consolidate multi-window domain outputs into hierarchical labels and sequential levels: This tool is intended for consolidating multiple runs with various window sizes and k-mer sizes and outputting a TSV with labels for each coordinate for the smallest window size set. The domain labels are arranged by: 1) fewest to most expected clusters; and 2) largest to smallest window size. All other ordering should be expected as the first to last in the list. As this is improved, the goal is to use this consolidated data to produce alluvial plots and user labeling.
 
 ```bash
 python src/utils/hierarchical_composition.py \
-  -i domain_50k.beg domain_25k.beg domain_10k.beg \
+  -i genome_50k_domains.beg genome_10k_domains.beg \
   -o hierarchical_output.tsv
-```
-
-### `alluvial_plot.py`
-
-Render alluvial flow plot from hierarchical composition output:
-
-```bash
-python src/utils/alluvial_plot.py \
-  -i hierarchical_output.tsv \
-  -o alluvial_flow.png
 ```
 
 ---
@@ -123,7 +117,10 @@ BEG integrates several statistical and algorithmic methods to quantify sequence 
 
 2. **zlib Compression Model Complexity**:
    - Measures sequence complexity using lossless zlib compression ratio ($C = \frac{\text{bytes}(\text{zlib}(\text{seq}))}{\text{len}(\text{seq})}$).
-   - *Citation*: Compression ratios provide robust estimates of algorithmic sequence complexity and entropy rate (e.g., Li & Vitányi, *An Introduction to Kolmogorov Complexity and Its Applications*, Springer).
+   - *Reviews for biological information compression*:
+   - - "Data structures and compression algorithms for genomic sequence data" (https://doi.org/10.1093/bioinformatics/btp319)
+   - - "Textual data compression in computational biology: a synopsis" (https://doi.org/10.1093/bioinformatics/btp117)
+   - - "Data Compression Concepts and Algorithms and Their Applications to Bioinformatics" (https://doi.org/10.3390/e12010034)
 
 3. **Shannon Information Entropy**:
    - Calculates relative k-mer proportion entropy across window features using the natural logarithm ($H = -\sum_{i} p_i \ln(p_i)$).
