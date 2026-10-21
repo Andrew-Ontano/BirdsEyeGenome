@@ -839,17 +839,28 @@ def identify_regional_domains(
     if max_components < 1:
         raise ValueError("Not enough features or samples for PCA.")
 
-    pca_target: float | int = variance_target
-    if isinstance(variance_target, float) and (variance_target <= 0 or variance_target >= 1.0):
-        pca_target = min(5, max_components)
-    elif isinstance(variance_target, float) and max_components == 1:
-        pca_target = 1
-    # Use "full" if pca_target is still a float, otherwise "randomized" for integers
 
-    target_solver = "full" if isinstance(pca_target, float) else "randomized"
-    pca = PCA(n_components=pca_target, svd_solver=target_solver, random_state=random_state)
-    pca_components = pca.fit_transform(scaled_data)
-    
+    target = variance_target
+    if isinstance(target, float) and (target <= 0.0 or target >= 1.0):
+        target = min(5, max_components)
+    elif max_components == 1:
+        target = 1
+
+    if isinstance(target, float):
+        # Fast randomized PCA for all features, then manual slice
+        pca = PCA(n_components=max_components, svd_solver="randomized", random_state=random_state)
+        full_components = pca.fit_transform(scaled_data)
+        # Calculate cumulative explained variance
+        cum_var = np.cumsum(pca.explained_variance_ratio_)
+        # Find the exact number of components needed to meet or exceed the target
+        needed_components = np.argmax(cum_var >= target) + 1
+        # Slice the transformed data array to the optimal size
+        pca_components = full_components[:, :needed_components]
+    else:
+        # Target is already a valid integer, run directly
+        pca = PCA(n_components=target, svd_solver="randomized", random_state=random_state)
+        pca_components = pca.fit_transform(scaled_data)
+
     lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
 
     profile_cols = feature_cols + ["entropy", "complexity"]
