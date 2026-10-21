@@ -23,26 +23,26 @@ def run_count(args) -> None:
         kmers = bl.set_mers(args.kmer_size)
         logger.info("Generated %d k-mers for k-mer size %d", len(kmers), args.kmer_size)
 
-        tasks = list(
-            bl.window_task_generator(
-                records,
-                window_size=args.window_size,
-                window_interval=args.window_interval,
-                kmer_list=kmers,
+
+        task_generator = bl.window_task_generator(
+            records,
+            window_size=args.window_size,
+            window_interval=args.window_interval,
+            kmer_list=kmers,
             )
-        )
-        logger.info("Generated %d window task(s)", len(tasks))
+
+        #logger.info("Generated %d window task(s)", len(tasks))
 
         threads = getattr(args, "threads", 1)
         results = []
 
-        if threads > 1 and len(tasks) > 0:
+        if threads > 1:
             logger.info("Processing window tasks using %d worker threads/processes", threads)
             with multiprocessing.Pool(processes=threads) as pool:
-                results = pool.map(bl.window_task, tasks)
+                results = list(pool.imap(bl.window_task, task_generator, chunksize=1000))
         else:
             logger.info("Processing window tasks sequentially")
-            results = [bl.window_task(task) for task in tasks]
+            results = [bl.window_task(task) for task in task_generator]
 
         output_format = getattr(args, "output_format", "beg")
         output_file = args.output
