@@ -13,6 +13,40 @@ import src.beglib as bl
 
 logger = logging.getLogger(__name__)
 
+def plot(seq, seq_df, feature_cols, color_map, key_setting, out_filename, dpi=300):
+    x_vals = seq_df["window_start"].values
+    fig, ax = plt.subplots(figsize=(12, 5))
+    y_lower = np.zeros(len(x_vals))
+    y_values = seq_df[feature_cols].values
+    y_stack = np.cumsum(y_values, axis=1)
+    for i, q in enumerate(feature_cols):
+        y_upper = y_lower + seq_df[q].values
+        ax.fill_between(
+            x_vals,
+            y_lower,
+            y_upper,
+            color=color_map[q],
+            label=q,
+            linewidth=0.15,
+        )
+        y_lower = y_stack[:, i]
+
+    ax.set_title(f"Genomic Signature: {seq}", fontsize=14, fontweight="bold")
+    ax.set_xlabel("Genomic Position (bp)", fontsize=11)
+    ax.set_ylabel("Proportion", fontsize=11)
+    ax.set_ylim(0, 1.0)
+    ax.set_xlim(x_vals[0], x_vals[-1] if len(x_vals) > 1 else x_vals[0] + 1)
+
+    if key_setting == "yes":
+        ax.legend(
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0,
+            fontsize="small",
+            frameon=False,
+        )
+    plt.savefig(out_filename, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
 
 def sanitize_filename(name: str) -> str:
     """Sanitize sequence name for safe use in file paths.
@@ -84,43 +118,8 @@ def run_plot(args) -> None:
         logger.info("Generating static plots for %d sequence(s)...", len(seq_names))
 
         for seq in seq_names:
-            seq_df = proc_df[proc_df["seq_name"] == seq]
-            x_vals = seq_df["window_start"].values
-
-            fig, ax = plt.subplots(figsize=(12, 5))
-
-            y_lower = np.zeros(len(x_vals))
-            for col in feature_cols:
-                y_upper = y_lower + seq_df[col].values
-                ax.fill_between(
-                    x_vals,
-                    y_lower,
-                    y_upper,
-                    color=color_map[col],
-                    label=col,
-                    linewidth=0.15,
-                )
-                y_lower = y_upper
-
-            ax.set_title(f"Genomic Signature: {seq}", fontsize=14, fontweight="bold")
-            ax.set_xlabel("Genomic Position (bp)", fontsize=11)
-            ax.set_ylabel("Proportion", fontsize=11)
-            ax.set_ylim(0, 1.0)
-            ax.set_xlim(x_vals[0], x_vals[-1] if len(x_vals) > 1 else x_vals[0] + 1)
-
-            if key_setting == "yes":
-                ax.legend(
-                    bbox_to_anchor=(1.02, 1),
-                    loc="upper left",
-                    borderaxespad=0,
-                    fontsize="small",
-                    frameon=False,
-                )
-
-            clean_seq = sanitize_filename(str(seq))
-            out_filename = f"{output_prefix}_{clean_seq}.{output_format}"
-            plt.savefig(out_filename, dpi=dpi, bbox_inches="tight")
-            plt.close(fig)
+            out_filename = f"{output_prefix}_{sanitize_filename(str(seq))}.{output_format}"
+            plot(seq=seq, seq_df=proc_df[proc_df["seq_name"] == seq], feature_cols=feature_cols, color_map=color_map, key_setting=key_setting, out_filename=out_filename, dpi=dpi)
             logger.info("Saved static plot to %s", out_filename)
 
         if key_setting == "alone":
@@ -137,6 +136,7 @@ def run_plot(args) -> None:
             key_filename = f"{output_prefix}_key.{output_format}"
             plt.savefig(key_filename, dpi=dpi, bbox_inches="tight")
             plt.close(fig_key)
+
             logger.info("Saved standalone key image to %s", key_filename)
 
         logger.info("Plot command completed successfully.")
