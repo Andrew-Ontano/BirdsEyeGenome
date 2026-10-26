@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import sqlite3
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -53,7 +51,14 @@ def load_domain_dataset(file_path: Path | str) -> tuple[pd.DataFrame, int]:
         # Check if windows metadata/complexity exists in SQLite
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='windows'")
         if cursor.fetchone() is not None:
-            w_df = pd.read_sql_query("SELECT seq_name, window_start, window_stop, library_name, window_size, complexity FROM windows", conn)
+            w_df = pd.read_sql_query(
+                "SELECT seq_name, window_start, window_stop, library_name, window_size, complexity, entropy FROM windows",
+                conn
+            )
+            # If entropy isn't in older DB versions, handle gracefully
+            if "entropy" not in w_df.columns:
+                w_df["entropy"] = 0.0
+
             if not w_df.empty and not df.empty:
                 df = df.merge(w_df, on=["seq_name", "window_start", "window_stop"], how="left")
 
@@ -75,50 +80,30 @@ def load_domain_dataset(file_path: Path | str) -> tuple[pd.DataFrame, int]:
     return df, window_size
 
 
-def map_parent_domain(base_df: pd.DataFrame, target_df: pd.DataFrame, col_name: str) -> list[str]:
-    """Map domain labels from target_df to base_df windows based on sequence coordinate overlap.
+def map_parent_domain(base_df: pd.DataFrame, target_df: pd.DataFrame, col_name: str) -> pd.Series:
+    """Map domain labels from target_df to base_df windows using vectorized backward merge."""
 
-    Args:
-        base_df (pd.DataFrame): Base window DataFrame (smallest window size).
-        target_df (pd.DataFrame): Target domain DataFrame.
-        col_name (str): Column name in target_df (e.g. 'Expected_2').
+    # Strip base_df to ONLY the keys needed for merging to prevent suffix collisions (_x, _y)
+    base_minimal = base_df[["seq_name", "window_start"]].copy()
+    base_minimal["orig_index"] = base_df.index
+    base_sorted = base_minimal.sort_values("window_start")
 
-    Returns:
-        list[str]: Mapped domain label for each row in base_df.
-    """
-    mapped_labels = []
+    # Target must also be globally sorted by the 'on' key (window_start)
+    target_sorted = target_df[["seq_name", "window_start", col_name]].sort_values("window_start")
 
-    # Group target_df by seq_name for fast lookup
-    target_groups = {str(seq): group for seq, group in target_df.groupby("seq_name")}
+    # Perform a fast backward coordinate join
+    merged = pd.merge_asof(
+        base_sorted,
+        target_sorted,
+        on="window_start",
+        by="seq_name",
+        direction="backward"
+    )
 
-    for _, row in base_df.iterrows():
-        seq = str(row["seq_name"])
-        b_start = row["window_start"]
-        b_stop = row["window_stop"]
+    # Sort back to the original dataframe's row order and fill missing mappings
+    merged = merged.sort_values("orig_index").reset_index(drop=True)
 
-        if seq not in target_groups:
-            mapped_labels.append("")
-            continue
-
-        seq_target = target_groups[seq]
-        # Match parent window where target_start <= b_start and target_stop >= b_stop
-        match = seq_target[(seq_target["window_start"] <= b_start) & (seq_target["window_stop"] >= b_stop)]
-        if match.empty:
-            # Fallback: calculate max coordinate overlap
-            overlaps = np.maximum(
-                0,
-                np.minimum(b_stop, seq_target["window_stop"].values)
-                - np.maximum(b_start, seq_target["window_start"].values),
-            )
-            best_idx = np.argmax(overlaps)
-            if overlaps[best_idx] > 0:
-                mapped_labels.append(str(seq_target.iloc[best_idx][col_name]))
-            else:
-                mapped_labels.append("")
-        else:
-            mapped_labels.append(str(match.iloc[0][col_name]))
-
-    return mapped_labels
+    return merged[col_name].fillna("")
 
 
 def build_hierarchical_composition(domain_files: list[str | Path]) -> pd.DataFrame:
@@ -154,6 +139,7 @@ def build_hierarchical_composition(domain_files: list[str | Path]) -> pd.DataFra
                 if state_str.isdigit():
                     all_states.add(int(state_str))
 
+    # Sort states ascending (Fewest states -> Most states)
     sorted_states = sorted(all_states)
 
     # Construct result DataFrame with required BEG base metadata
@@ -176,23 +162,20 @@ def build_hierarchical_composition(domain_files: list[str | Path]) -> pd.DataFra
             target_df = d["df"]
             if col_name in target_df.columns:
                 level_name = f"Level_{level_counter}"
-                mapped = map_parent_domain(base_df, target_df, col_name)
-                res_df[level_name] = mapped
+                res_df[level_name] = map_parent_domain(base_df, target_df, col_name)
                 level_cols.append(level_name)
                 level_counter += 1
 
-    # Generate shorthand hierarchical label
-    shorthand_labels = []
-    for _, row in res_df.iterrows():
-        parts = []
-        for col in level_cols:
-            val = str(row[col])
-            # Strip "Domain_" prefix for shorthand notation
-            shorthand = val.replace("Domain_", "") if val.startswith("Domain_") else val
-            parts.append(shorthand)
-        shorthand_labels.append("-".join(parts))
-
-    res_df["hierarchical_label"] = shorthand_labels
+    # Generate shorthand hierarchical label via vectorized string operations
+    if level_cols:
+        res_df["hierarchical_label"] = (
+            res_df[level_cols]
+            .astype(str)
+            .replace(r"^Domain_", "", regex=True)
+            .agg("-".join, axis=1)
+        )
+    else:
+        res_df["hierarchical_label"] = ""
 
     # Reorder columns: metadata, hierarchical_label, Level_1, Level_2, ...
     final_cols = [

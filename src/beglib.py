@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+from collections import Counter
+from collections.abc import Iterable, Iterator
 import concurrent.futures
+from hmmlearn.hmm import GaussianHMM
 import itertools
 import json
 import matplotlib.colors as mcolors
@@ -13,12 +15,11 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import sqlite3
-from typing import Any
-import zlib
 from scipy.ndimage import gaussian_filter1d
-from hmmlearn.hmm import GaussianHMM
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from typing import Any
+import zlib
 
 def read_genome(
     input_file: str,
@@ -113,7 +114,7 @@ def calculate_complexity(sequence: str) -> float:
     """
     if not sequence:
         return 0.0
-    return len(zlib.compress(sequence.encode("utf-8"))) / len(sequence)
+    return len(zlib.compress(sequence.encode("ascii"))) / len(sequence)
 
 
 def count_mers(task: dict[str, Any]) -> dict[str, Any]:
@@ -135,11 +136,10 @@ def count_mers(task: dict[str, Any]) -> dict[str, Any]:
     seq_len = len(subseq)
 
     if seq_len >= kmer_len > 0:
-        for i in range(seq_len - kmer_len + 1):
-            kmer = subseq[i: i + kmer_len]
+        kmer_list = [subseq[i: i + kmer_len] for i in range(seq_len - kmer_len + 1)]
+        for kmer, count in Counter(kmer_list).items():
             if kmer in counts:
-                counts[kmer] += 1
-
+                counts[kmer] = count
     return {
         "seq_name": task["seq_name"],
         "start": task["start"],
@@ -210,9 +210,10 @@ def init_db(db_path: str, kmers: list[str] | None = None, kmer_size: int = 3) ->
 def write_counts_db(
         conn: sqlite3.Connection,
         library_name: str,
-        results: list[dict[str, Any]],
+        results: Iterable[dict[str, Any]],
         kmers: list[str],
         kmer_size: int | None = None,
+        batch_size: int = 10000,
 ) -> None:
     cursor = conn.cursor()
 
@@ -250,6 +251,13 @@ def write_counts_db(
             dense_counts.tobytes()  # Convert the numpy array directly to binary
         ))
 
+        if len(window_rows) >= batch_size:
+            cursor.executemany(
+                "INSERT INTO windows (library_name, seq_name, window_start, window_stop, window_size, complexity, counts) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                window_rows,
+            )
+            window_rows.clear()
     if window_rows:
         # One single executemany handles everything
         cursor.executemany(
@@ -705,11 +713,8 @@ def _fit_hmm_state(
         pca_components: np.ndarray,
         lengths: list[int] | None,
         random_state: int,
-        profile_cols: list[str],
-        freq_df: pd.DataFrame
-) -> tuple[int, list[str], pd.DataFrame]:
+) -> tuple[int, list[str]]:
     """Worker function to fit HMM for a specific state count."""
-    from hmmlearn.hmm import GaussianHMM
     effective_states = min(num_s, pca_components.shape[0])
     hmm_model = GaussianHMM(
         n_components=effective_states,
@@ -727,11 +732,7 @@ def _fit_hmm_state(
 
     assignments = [f"Domain_{s}" for s in domain_assignments]
 
-    temp_df = pd.DataFrame({"Domain_ID": assignments})
-    prof = aggregate_domain_frequencies(temp_df, profile_cols, freq_df)
-    prof.insert(0, "Expected_States", num_s)
-
-    return num_s, assignments, prof
+    return num_s, assignments
 
 
 def identify_regional_domains(
@@ -814,13 +815,21 @@ def identify_regional_domains(
     # 3. Pre-PCA Gaussian smoothing per sequence contig
     if smoothing_sigma > 0.0:
         if "seq_name" in df.columns:
+            lengths = df.groupby("seq_name", sort=False).size()
+            raw_vals = model_freq_df.values
+
+            smoothed_arrays = []
+            start = 0
+            for length in lengths:
+                end = start + length
+                chunk = raw_vals[start:end]
+                smoothed_arrays.append(gaussian_filter1d(chunk, sigma=smoothing_sigma, axis=0))
+                start = end
             for seq_name, group in df.groupby("seq_name", sort=False):
                 indices = group.index
                 smoothed = gaussian_filter1d(model_freq_df.loc[indices].values, sigma=smoothing_sigma, axis=0)
                 model_freq_df.loc[indices] = smoothed
-        else:
-            smoothed = gaussian_filter1d(model_freq_df.values, sigma=smoothing_sigma, axis=0)
-            model_freq_df[:] = smoothed
+            model_freq_df.iloc[:, :] = np.vstack(smoothed_arrays)
 
     # 4. Dimensionality Reduction (StandardScaler + PCA)
     scaler = StandardScaler()
@@ -830,14 +839,27 @@ def identify_regional_domains(
     if max_components < 1:
         raise ValueError("Not enough features or samples for PCA.")
 
-    pca_target: float | int = variance_target
-    if isinstance(variance_target, float) and (variance_target <= 0 or variance_target >= 1.0):
-        pca_target = min(5, max_components)
-    elif isinstance(variance_target, float) and max_components == 1:
-        pca_target = 1
 
-    pca = PCA(n_components=pca_target, random_state=random_state)
-    pca_components = pca.fit_transform(scaled_data)
+    target = variance_target
+    if isinstance(target, float) and (target <= 0.0 or target >= 1.0):
+        target = min(5, max_components)
+    elif max_components == 1:
+        target = 1
+
+    if isinstance(target, float):
+        # Fast randomized PCA for all features, then manual slice
+        pca = PCA(n_components=max_components, svd_solver="randomized", random_state=random_state)
+        full_components = pca.fit_transform(scaled_data)
+        # Calculate cumulative explained variance
+        cum_var = np.cumsum(pca.explained_variance_ratio_)
+        # Find the exact number of components needed to meet or exceed the target
+        needed_components = np.argmax(cum_var >= target) + 1
+        # Slice the transformed data array to the optimal size
+        pca_components = full_components[:, :needed_components]
+    else:
+        # Target is already a valid integer, run directly
+        pca = PCA(n_components=target, svd_solver="randomized", random_state=random_state)
+        pca_components = pca.fit_transform(scaled_data)
 
     lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
 
@@ -847,15 +869,19 @@ def identify_regional_domains(
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         futures = {
             executor.submit(
-                _fit_hmm_state, num_s, pca_components, lengths, random_state, profile_cols, model_freq_df
+                _fit_hmm_state, num_s, pca_components, lengths, random_state
             ): num_s
             for num_s in state_list
         }
 
         for future in concurrent.futures.as_completed(futures):
-            num_s, assignments, prof = future.result()
+            num_s, assignments = future.result()
             col_name = f"Expected_{num_s}"
             df_results[col_name] = assignments
+
+            temp_df = pd.DataFrame({"Domain_ID": assignments})
+            prof = aggregate_domain_frequencies(temp_df, profile_cols, model_freq_df)
+            prof.insert(0, "Expected_States", num_s)
             profile_frames.append(prof)
 
     # Sort results to ensure deterministic column order

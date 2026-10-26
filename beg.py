@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--key",
         type=str,
         required=False,
-        default="yes",
+        default="no",
         choices=["yes", "no", "alone"],
         help="Key/legend setting: 'yes' (on image), 'no' (omitted), or 'alone' (separate image).",
     )
