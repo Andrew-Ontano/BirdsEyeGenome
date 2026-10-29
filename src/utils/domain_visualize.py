@@ -78,6 +78,19 @@ def load_domain_data(file_path: Path | str) -> pd.DataFrame:
         return pd.read_csv(str(path), sep="\t", comment="#")
 
 
+def _build_step_coords(df: pd.DataFrame, y_col: str) -> tuple[np.ndarray, np.ndarray]:
+    """Build step plot coordinates (x, y) spanning [window_start, window_stop] per row."""
+    x_coords = []
+    y_coords = []
+    for _, row in df.iterrows():
+        w_start = row["window_start"]
+        w_stop = row["window_stop"]
+        val = row[y_col]
+        x_coords.extend([w_start, w_stop])
+        y_coords.extend([val, val])
+    return np.array(x_coords), np.array(y_coords)
+
+
 def visualize_domains(
     domains_path: Path | str,
     counts_path: Path | str,
@@ -154,17 +167,23 @@ def visualize_domains(
         ax_complexity = axes[2]
         domain_axes = axes[3:]
 
-        # 1. BEG stacked k-mer proportion plot
-        x_vals = seq_counts["window_start"].values
-        window_stops = seq_counts["window_stop"].values
-        y_lower = np.zeros(len(x_vals))
+        # 1. BEG stacked k-mer proportion plot (supporting collated or raw blocks)
+        x_block_coords = []
+        for _, row in seq_counts.iterrows():
+            x_block_coords.extend([row["window_start"], row["window_stop"]])
+        x_block_coords = np.array(x_block_coords)
+
+        y_lower = np.zeros(len(seq_counts))
 
         for col in feature_cols:
             y_upper = y_lower + seq_counts[col].values
+            y_lower_step = np.repeat(y_lower, 2)
+            y_upper_step = np.repeat(y_upper, 2)
+
             ax_count.fill_between(
-                x_vals,
-                y_lower,
-                y_upper,
+                x_block_coords,
+                y_lower_step,
+                y_upper_step,
                 color=color_map[col],
                 label=col,
                 linewidth=0.15,
@@ -177,24 +196,31 @@ def visualize_domains(
 
         # 2. Shannon Entropy line graph
         if "entropy" in seq_domains.columns:
-            entropy_vals = seq_domains["entropy"].values
+            x_ent, y_ent = _build_step_coords(seq_domains, "entropy")
+        elif "entropy" in seq_counts.columns:
+            x_ent, y_ent = _build_step_coords(seq_counts, "entropy")
         else:
-            entropy_vals = bl.calculate_shannon_entropy(seq_counts[feature_cols]).values
+            calc_entropy = bl.calculate_shannon_entropy(seq_counts[feature_cols]).values
+            temp_df = seq_counts[["window_start", "window_stop"]].copy()
+            temp_df["entropy"] = calc_entropy
+            x_ent, y_ent = _build_step_coords(temp_df, "entropy")
 
-        ax_entropy.plot(x_vals, entropy_vals, color="#1f77b4", linewidth=1.5)
+        ax_entropy.plot(x_ent, y_ent, color="#1f77b4", linewidth=1.5)
         ax_entropy.set_ylabel("Entropy\n(nats)", fontsize=9, rotation=0, ha="right", va="center")
         ax_entropy.set_ylim(bottom=0)
         ax_entropy.grid(True, linestyle="--", alpha=0.5)
 
         # 3. zlib Complexity line graph
-        if "complexity" in seq_counts.columns:
-            complexity_vals = seq_counts["complexity"].values
-        elif "complexity" in seq_domains.columns:
-            complexity_vals = seq_domains["complexity"].values
+        if "complexity" in seq_domains.columns:
+            x_comp, y_comp = _build_step_coords(seq_domains, "complexity")
+        elif "complexity" in seq_counts.columns:
+            x_comp, y_comp = _build_step_coords(seq_counts, "complexity")
         else:
-            complexity_vals = np.zeros(len(x_vals))
+            temp_df = seq_counts[["window_start", "window_stop"]].copy()
+            temp_df["complexity"] = 0.0
+            x_comp, y_comp = _build_step_coords(temp_df, "complexity")
 
-        ax_complexity.plot(x_vals, complexity_vals, color="#d62728", linewidth=1.5)
+        ax_complexity.plot(x_comp, y_comp, color="#d62728", linewidth=1.5)
         ax_complexity.set_ylabel("Complexity\n(zlib)", fontsize=9, rotation=0, ha="right", va="center")
         ax_complexity.set_ylim(bottom=0)
         ax_complexity.grid(True, linestyle="--", alpha=0.5)
@@ -224,8 +250,10 @@ def visualize_domains(
             ax_dom.set_yticks([])
             ax_dom.set_ylim(-0.5, 0.5)
 
+        min_x = min(seq_counts["window_start"].min(), seq_domains["window_start"].min())
+        max_x = max(seq_counts["window_stop"].max(), seq_domains["window_stop"].max())
         axes[-1].set_xlabel("Genomic Position (bp)", fontsize=11)
-        axes[-1].set_xlim(x_vals[0], window_stops[-1] if len(window_stops) > 0 else x_vals[0] + 1)
+        axes[-1].set_xlim(min_x, max_x)
 
         clean_seq = sanitize_filename(str(seq))
         out_file = out_dir / f"{clean_seq}_domains.{img_format}"

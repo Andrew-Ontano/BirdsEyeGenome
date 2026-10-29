@@ -40,13 +40,15 @@ def run_domains(args) -> None:
         n_states = getattr(args, "n_states", "4")
         variance_target = getattr(args, "variance_target", 0.90)
         smoothing_sigma = getattr(args, "smoothing_sigma", 1.0)
+        collation_threshold = getattr(args, "collation_threshold", 0.005)
         threads = getattr(args, "threads", 1)
 
         logger.info(
-            "Running domain identification: n_states=%s, variance_target=%.2f, smoothing_sigma=%.2f, canonical=%s",
+            "Running domain identification: n_states=%s, variance_target=%.2f, smoothing_sigma=%.2f, collation_threshold=%.4f, canonical=%s",
             str(n_states),
             variance_target,
             smoothing_sigma,
+            collation_threshold,
             use_canonical,
         )
 
@@ -57,6 +59,7 @@ def run_domains(args) -> None:
             n_states=n_states,
             variance_target=variance_target,
             smoothing_sigma=smoothing_sigma,
+            collation_threshold=collation_threshold,
             threads=threads,
         )
 

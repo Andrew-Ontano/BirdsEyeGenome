@@ -325,6 +325,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Standard deviation for pre-PCA Gaussian smoothing filter across consecutive windows (default: 1.0).",
     )
     parser_domains.add_argument(
+        "--collation-threshold",
+        type=float,
+        required=False,
+        default=0.005,
+        help="Variance/distance threshold for collating neighboring window blocks prior to PCA (default: 0.005).",
+    )
+    parser_domains.add_argument(
         "--canonical",
         action="store_true",
         default=False,
