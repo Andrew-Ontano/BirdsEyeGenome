@@ -9,6 +9,7 @@ import sqlite3
 
 import src.beglib as bl
 from beg import build_parser
+from src.utils.domain_visualize import visualize_domains
 
 
 def test_collate_neighboring_blocks_identical():
@@ -162,3 +163,47 @@ def test_identify_regional_domains_with_collation():
     assert len(df_results) < len(df)
     assert "Expected_2" in df_results.columns
     assert not profiles.empty
+
+
+def test_visualize_domains_collated():
+    """Test visualize_domains utility with collated domain blocks."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        counts_file = tmp_path / "counts.beg"
+        domains_file = tmp_path / "domains.beg"
+
+        # 3 raw counts windows
+        counts_df = pd.DataFrame({
+            "library_name": ["lib", "lib", "lib"],
+            "seq_name": ["chr1", "chr1", "chr1"],
+            "window_start": [1, 10001, 20001],
+            "window_stop": [10000, 20000, 30000],
+            "window_size": [10000, 10000, 10000],
+            "complexity": [0.5, 0.5, 0.5],
+            "AAA": [10, 10, 100],
+            "AAC": [20, 20, 200],
+        })
+        counts_df.to_csv(counts_file, sep="\t", index=False)
+
+        # 2 collated domain blocks
+        domains_df = pd.DataFrame({
+            "library_name": ["lib", "lib"],
+            "seq_name": ["chr1", "chr1"],
+            "window_start": [1, 20001],
+            "window_stop": [20000, 30000],
+            "window_size": [20000, 10000],
+            "complexity": [0.5, 0.5],
+            "entropy": [1.5, 2.5],
+            "Expected_2": ["Domain_0", "Domain_1"],
+        })
+        domains_df.to_csv(domains_file, sep="\t", index=False)
+
+        visualize_domains(
+            domains_path=domains_file,
+            counts_path=counts_file,
+            output_dir=tmp_path / "plots",
+            img_format="png",
+        )
+
+        out_img = tmp_path / "plots" / "chr1_domains.png"
+        assert out_img.exists()
