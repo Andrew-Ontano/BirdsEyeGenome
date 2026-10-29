@@ -47,7 +47,7 @@ Dependencies installed via `pyproject.toml` include `biopython`, `pandas`, `nump
 BEG provides a modular CLI interface via `beg.py` and dedicated utilities in `src/utils/`:
 
 1. **`beg count`**: Sliding window k-mer frequency counting across FASTA sequence contigs. Computes k-mer counts alongside zlib compression complexity per window and outputs tab-separated `.beg` text files or binary SQLite `.db` databases.
-2. **`beg domains`**: Dimensionality reduction (PCA) and sequence segmentation using Hidden Markov Models (GaussianHMM). Uncovers hidden domain states across expected cluster counts ($N$-states) and computes Shannon entropy and zlib complexity per window.
+2. **`beg domains`**: Dimensionality reduction (PCA) and sequence segmentation using Hidden Markov Models (GaussianHMM). Assesses similarity of adjacent windows to collate neighboring blocks prior to PCA (`--collation-threshold`, default 0.005). Uncovers hidden domain states across expected cluster counts ($N$-states) and computes Shannon entropy and zlib complexity per window.
 3. **`beg plot`**: Generates high-resolution stacked sequence signature figures (PNG, PDF, SVG) displaying k-mer composition patterns.
 4. **`beg server`**: Launches an interactive Dash web application (`http://127.0.0.1:8050`) for closer looks at genome signature inspection.
 5. **`src/utils/domain_visualize.py`**: Visualizes aligned stacked k-mer signatures, Shannon entropy line graphs, zlib complexity line graphs, and horizontal domain state prediction blocks.
@@ -138,13 +138,17 @@ BEG integrates several statistical and algorithmic methods to quantify sequence 
    - Calculates relative k-mer proportion entropy across window features using the natural logarithm ($H = -\sum_{i} p_i \ln(p_i)$).
    - *Citation*: Shannon, C. E. (1948). A mathematical theory of communication. *Bell System Technical Journal*, 27(3), 379-423.
 
-4. **1D Gaussian Smoothing Filter**:
+4. **Neighbor Block Collation**:
+   - Evaluates similarity between adjacent window blocks within each sequence contig using normalized Euclidean distance over Min-Max scaled k-mer frequencies, Shannon entropy, and zlib complexity.
+   - Merges qualifying adjacent windows below `--collation-threshold` (default 0.005) into singular collated blocks with length-weighted feature averages prior to dimensionality reduction and HMM segmentation.
+
+5. **1D Gaussian Smoothing Filter**:
    - Applies Gaussian smoothing ($\sigma=1.0$) across adjacent spatial windows per sequence contig prior to PCA to reduce single-window noise while preserving boundaries.
 
-5. **Principal Component Analysis (PCA)**:
+6. **Principal Component Analysis (PCA)**:
    - Reduces high-dimensional normalized k-mer frequency matrices down to principal components capturing target cumulative variance ($\ge 90\%$).
    - *Citation*: Pearson, K. (1901). On lines and planes of closest fit to systems of points in space. *Philosophical Magazine*, 2(11), 559-572; Pedregosa et al. (2011). Scikit-learn: Machine Learning in Python. *JMLR*, 12, 2825-2830.
 
-6. **Hidden Markov Model (HMM) Regional Segmentation**:
+7. **Hidden Markov Model (HMM) Regional Segmentation**:
    - Models transitions between hidden domain states across PCA component representations using Gaussian HMMs with full covariance structure (`hmmlearn.hmm.GaussianHMM`).
    - *Citation*: Rabiner, L. R. (1989). A tutorial on Hidden Markov Models and selected applications in speech recognition. *Proceedings of the IEEE*, 77(2), 257-286.
