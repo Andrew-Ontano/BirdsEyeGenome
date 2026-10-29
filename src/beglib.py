@@ -735,6 +735,121 @@ def _fit_hmm_state(
     return num_s, assignments
 
 
+def collate_neighboring_blocks(
+    df_results: pd.DataFrame,
+    model_freq_df: pd.DataFrame,
+    feature_cols: list[str],
+    collation_threshold: float = 0.005,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Collate neighboring windows into larger blocks if their normalized Euclidean distance
+    across scaled k-mer proportions, entropy, and complexity is within collation_threshold.
+
+    Args:
+        df_results (pd.DataFrame): Window metadata DataFrame with localization and metrics.
+        model_freq_df (pd.DataFrame): DataFrame of k-mer relative frequencies, entropy, and complexity.
+        feature_cols (list[str]): List of k-mer feature column names.
+        collation_threshold (float): Variance/distance threshold for collating neighboring window blocks.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: Updated (df_results, model_freq_df) with collated blocks.
+    """
+    if collation_threshold <= 0.0 or len(df_results) <= 1:
+        return df_results, model_freq_df
+
+    all_features = feature_cols + ["entropy", "complexity"]
+    feature_matrix = model_freq_df[all_features].values.copy()
+
+    # Min-Max scale features across dataset prior to distance computation
+    f_min = feature_matrix.min(axis=0, keepdims=True)
+    f_max = feature_matrix.max(axis=0, keepdims=True)
+    f_diff = f_max - f_min
+    f_diff[f_diff == 0.0] = 1.0
+    scaled_matrix = (feature_matrix - f_min) / f_diff
+
+    # Group by sequence name if present to ensure collation stays within contigs
+    if "seq_name" in df_results.columns:
+        seq_names = df_results["seq_name"].values
+    else:
+        seq_names = np.array(["seq"] * len(df_results))
+
+    blocks_indices: list[list[int]] = []
+    current_block: list[int] = [0]
+
+    for idx in range(len(df_results) - 1):
+        if seq_names[idx] == seq_names[idx + 1]:
+            # Compare scaled feature vector of window idx and window idx+1
+            v1 = scaled_matrix[idx]
+            v2 = scaled_matrix[idx + 1]
+            dist = np.sqrt(np.mean((v1 - v2) ** 2))
+            if dist <= collation_threshold:
+                current_block.append(idx + 1)
+            else:
+                blocks_indices.append(current_block)
+                current_block = [idx + 1]
+        else:
+            blocks_indices.append(current_block)
+            current_block = [idx + 1]
+
+    if current_block:
+        blocks_indices.append(current_block)
+
+    # Build collated DataFrames
+    new_results_rows = []
+    new_model_freq_rows = []
+
+    for block in blocks_indices:
+        sub_res = df_results.iloc[block]
+        sub_freq = model_freq_df.iloc[block]
+
+        # Calculate window length weights
+        if "window_size" in sub_res.columns:
+            weights = sub_res["window_size"].values.astype(float)
+        elif "window_start" in sub_res.columns and "window_stop" in sub_res.columns:
+            weights = (sub_res["window_stop"] - sub_res["window_start"] + 1).values.astype(float)
+        else:
+            weights = np.ones(len(block), dtype=float)
+
+        if weights.sum() == 0:
+            weights = np.ones(len(block), dtype=float)
+
+        # Boundaries
+        w_start = sub_res["window_start"].iloc[0] if "window_start" in sub_res.columns else 0
+        w_stop = sub_res["window_stop"].iloc[-1] if "window_stop" in sub_res.columns else 0
+        w_size = w_stop - w_start + 1 if "window_start" in sub_res.columns and "window_stop" in sub_res.columns else int(weights.sum())
+
+        # Weighted averages for model_freq_df
+        weighted_freq = np.average(sub_freq[all_features].values, axis=0, weights=weights)
+        freq_row_dict = {col: val for col, val in zip(all_features, weighted_freq)}
+        new_model_freq_rows.append(freq_row_dict)
+
+        # Metadata row for df_results
+        res_row = {}
+        if "library_name" in sub_res.columns:
+            res_row["library_name"] = sub_res["library_name"].iloc[0]
+        if "seq_name" in sub_res.columns:
+            res_row["seq_name"] = sub_res["seq_name"].iloc[0]
+        if "window_start" in sub_res.columns:
+            res_row["window_start"] = w_start
+        if "window_stop" in sub_res.columns:
+            res_row["window_stop"] = w_stop
+        if "window_size" in sub_res.columns:
+            res_row["window_size"] = w_size
+
+        res_row["complexity"] = freq_row_dict["complexity"]
+        res_row["entropy"] = freq_row_dict["entropy"]
+
+        if "comment" in sub_res.columns:
+            comments = [c for c in sub_res["comment"].values if c]
+            res_row["comment"] = comments[0] if comments else ""
+
+        new_results_rows.append(res_row)
+
+    collated_df_results = pd.DataFrame(new_results_rows)
+    collated_model_freq_df = pd.DataFrame(new_model_freq_rows)
+
+    return collated_df_results, collated_model_freq_df
+
+
 def identify_regional_domains(
     df: pd.DataFrame,
     kmer_cols: list[str],
@@ -742,6 +857,7 @@ def identify_regional_domains(
     n_states: int | str = 4,
     variance_target: float = 0.90,
     smoothing_sigma: float = 1.0,
+    collation_threshold: float = 0.005,
     random_state: int = 42,
     threads: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -759,6 +875,8 @@ def identify_regional_domains(
             Defaults to 0.90.
         smoothing_sigma (float): Standard deviation for pre-PCA Gaussian smoothing filter.
             Defaults to 1.0.
+        collation_threshold (float): Variance/distance threshold for collating neighboring window blocks.
+            Defaults to 0.005.
         random_state (int): Seed for HMM initialization reproducible results.
 
     Returns:
@@ -812,10 +930,19 @@ def identify_regional_domains(
     # Set comments for zero/N-gap windows
     df_results["comment"] = ["N-gap present" if zero_mask.iloc[i] else "" for i in range(len(df))]
 
+    # Collate neighboring window blocks prior to Gaussian smoothing / PCA if threshold > 0
+    if collation_threshold > 0.0:
+        df_results, model_freq_df = collate_neighboring_blocks(
+            df_results=df_results,
+            model_freq_df=model_freq_df,
+            feature_cols=feature_cols,
+            collation_threshold=collation_threshold,
+        )
+
     # 3. Pre-PCA Gaussian smoothing per sequence contig
     if smoothing_sigma > 0.0:
-        if "seq_name" in df.columns:
-            lengths = df.groupby("seq_name", sort=False).size()
+        if "seq_name" in df_results.columns:
+            lengths = df_results.groupby("seq_name", sort=False).size()
             raw_vals = model_freq_df.values
 
             smoothed_arrays = []
@@ -825,7 +952,7 @@ def identify_regional_domains(
                 chunk = raw_vals[start:end]
                 smoothed_arrays.append(gaussian_filter1d(chunk, sigma=smoothing_sigma, axis=0))
                 start = end
-            for seq_name, group in df.groupby("seq_name", sort=False):
+            for seq_name, group in df_results.groupby("seq_name", sort=False):
                 indices = group.index
                 smoothed = gaussian_filter1d(model_freq_df.loc[indices].values, sigma=smoothing_sigma, axis=0)
                 model_freq_df.loc[indices] = smoothed
@@ -838,7 +965,6 @@ def identify_regional_domains(
     max_components = min(scaled_data.shape[0], scaled_data.shape[1])
     if max_components < 1:
         raise ValueError("Not enough features or samples for PCA.")
-
 
     target = variance_target
     if isinstance(target, float) and (target <= 0.0 or target >= 1.0):
@@ -861,7 +987,7 @@ def identify_regional_domains(
         pca = PCA(n_components=target, svd_solver="randomized", random_state=random_state)
         pca_components = pca.fit_transform(scaled_data)
 
-    lengths = df.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df.columns else None
+    lengths = df_results.groupby("seq_name", sort=False).size().tolist() if "seq_name" in df_results.columns else None
 
     profile_cols = feature_cols + ["entropy", "complexity"]
 
