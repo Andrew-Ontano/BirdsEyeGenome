@@ -20,6 +20,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from typing import Any
 import zlib
+import gzip
 
 def read_genome(
     input_file: str,
@@ -41,8 +42,11 @@ def read_genome(
     file_path = Path(input_file)
     if not file_path.exists() or not file_path.is_file():
         raise FileNotFoundError(f"Input file does not exist or is not a file: {input_file}")
-
-    return SeqIO.parse(str(file_path), input_format)
+    if file_path.suffix.lower() == ".gz":
+        with gzip.open(input_file, "rt") as f:
+            yield from SeqIO.parse(f, input_format)
+    else:
+        yield from SeqIO.parse(str(file_path), input_format)
 
 
 def set_mers(kmer_size: int = 3) -> list[str]:
